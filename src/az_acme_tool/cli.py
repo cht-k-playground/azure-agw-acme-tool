@@ -5,6 +5,7 @@ from typing import Any
 import click
 
 from az_acme_tool import __version__
+from az_acme_tool.logging import setup_logging
 
 
 @click.group()
@@ -21,6 +22,7 @@ from az_acme_tool import __version__
 def main(ctx: click.Context, config: str, verbose: bool) -> None:
     """Azure Application Gateway ACME automated certificate management tool."""
     ctx.ensure_object(dict)
+    setup_logging(verbose=verbose)
     ctx.obj["config"] = config
     ctx.obj["verbose"] = verbose
 
