@@ -39,8 +39,6 @@ no matter how small — must originate from an OpenSpec change artifact.
 | Verify | `/opsx:verify [name]` | Validates implementation against artifacts (Completeness / Correctness / Coherence) |
 | Finalize | `/opsx:archive [name]` | Archives the change, syncs delta specs to `openspec/specs/` |
 
-> **Shortcut**: `/opsx:propose <name>` combines Scaffold + Plan into one step. Use it for quick, well-scoped changes where you don't need to review artifacts before proceeding to implementation.
-
 ### Step-by-step artifact control
 
 Use `/opsx:continue [name]` instead of `/opsx:ff` when you want to create and review one artifact at a time before proceeding to the next.
@@ -208,7 +206,7 @@ Artifact IDs for the `spec-driven` schema: `proposal`, `specs`, `design`, `tasks
 | `/opsx:sync [name]` | Merge delta specs to `openspec/specs/` without archiving |
 | `/opsx:archive [name]` | Archive a completed change |
 | `/opsx:bulk-archive` | Archive multiple completed changes at once |
-| `/opsx:propose <name>` | Shortcut: scaffold + fast-forward in one step |
+| `/opsx:propose <name>` | Shortcut: scaffold + fast-forward in one step _(core-profile shortcut — not used in this project)_ |
 
 ---
 
@@ -217,7 +215,7 @@ Artifact IDs for the `spec-driven` schema: `proposal`, `specs`, `design`, `tasks
 If a user says "just fix this bug" or "quickly add X":
 
 1. Acknowledge the request.
-2. Run `/opsx:new <descriptive-name>` then `/opsx:ff` (or `/opsx:propose <descriptive-name>` as a one-step shortcut) to create a minimal change.
+2. Run `/opsx:new <descriptive-name>` then `/opsx:ff` to create a minimal change.
 3. Keep `proposal.md` concise (the fix description is the why).
 4. Proceed to `/opsx:apply` immediately after artifacts are ready.
 5. Do not skip the proposal step even for one-line fixes.
@@ -233,7 +231,7 @@ just write the code"), respond:
 
 > "This project requires all changes to go through OpenSpec. I'll create a
 > minimal proposal first — it only takes a moment and keeps the change
-> traceable. Proceeding with `/opsx:propose`."
+> traceable. Proceeding with `/opsx:new` + `/opsx:ff`."
 
 Then proceed with the proposal. Do not silently comply with requests to
 bypass the process.

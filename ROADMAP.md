@@ -1,14 +1,14 @@
 # az-acme-tool — Development Roadmap
 
 本文件追蹤此專案所有計畫中的 OpenSpec 變更。
-每個項目對應恰好一個 `/opsx:propose` → `/opsx:apply` → `/opsx:archive` 週期。
+每個項目對應恰好一個 `/opsx:new` → `/opsx:ff` → `/opsx:apply` → `/opsx:verify` → `/opsx:archive` 週期。
 
 **使用方式**：
 - 在目前階段選取下一個 `[ ]` 項目。
-- 執行 `/opsx:propose <change-name>` 開始。
+- 執行 `/opsx:new <change-name>`，再執行 `/opsx:ff` 開始。
 - 僅在 `/opsx:archive` 完成後才標記為 `[x]`。
 - 當另一個變更為 `in_progress` 時，不得開始新項目。
-- 本文件是所有 AI Agent 執行 `/opsx:propose` 時的首要參考來源 — 每個條目的細節即為 `proposal.md`、`design.md`、`tasks.md` 的撰寫依據。
+- 本文件是所有 AI Agent 執行 `/opsx:new` + `/opsx:ff` 時的首要參考來源 — 每個條目的細節即為 `proposal.md`、`design.md`、`tasks.md` 的撰寫依據。
 
 **狀態圖例**：
 - `[ ]` 尚未開始
