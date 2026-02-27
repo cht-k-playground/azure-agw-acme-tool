@@ -105,22 +105,33 @@ def test_main_default_config_path(runner: CliRunner) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tests: subcommands (error path - NotImplementedError)
+# Tests: subcommands (error path - missing config)
 # ---------------------------------------------------------------------------
 
 
-def test_init_subcommand_raises_not_implemented(runner: CliRunner) -> None:
-    """init subcommand raises NotImplementedError (not yet implemented)."""
+def test_init_subcommand_config_template(runner: CliRunner) -> None:
+    """init --config-template prints a YAML template to stdout and exits 0."""
     with patch("az_acme_tool.cli.setup_logging"):
-        with pytest.raises(NotImplementedError):
-            runner.invoke(main, ["init"], catch_exceptions=False)
+        result = runner.invoke(
+            main,
+            ["init", "--config-template"],
+            catch_exceptions=False,
+        )
+    assert result.exit_code == 0
+    assert "acme:" in result.output
+    assert "azure:" in result.output
 
 
-def test_issue_subcommand_raises_not_implemented(runner: CliRunner) -> None:
-    """issue subcommand raises NotImplementedError (not yet implemented)."""
+def test_issue_subcommand_missing_config(runner: CliRunner) -> None:
+    """issue subcommand exits non-zero with an error message when config is missing."""
     with patch("az_acme_tool.cli.setup_logging"):
-        with pytest.raises(NotImplementedError):
-            runner.invoke(main, ["issue"], catch_exceptions=False)
+        result = runner.invoke(
+            main,
+            ["--config", "/nonexistent/path/config.yaml", "issue"],
+            catch_exceptions=False,
+        )
+    assert result.exit_code != 0
+    assert "Error" in (result.output + (result.stderr if hasattr(result, "stderr") else ""))
 
 
 def test_renew_subcommand_raises_not_implemented(runner: CliRunner) -> None:
@@ -130,11 +141,16 @@ def test_renew_subcommand_raises_not_implemented(runner: CliRunner) -> None:
             runner.invoke(main, ["renew"], catch_exceptions=False)
 
 
-def test_status_subcommand_raises_not_implemented(runner: CliRunner) -> None:
-    """status subcommand raises NotImplementedError (not yet implemented)."""
+def test_status_subcommand_missing_config(runner: CliRunner) -> None:
+    """status subcommand exits non-zero with an error message when config is missing."""
     with patch("az_acme_tool.cli.setup_logging"):
-        with pytest.raises(NotImplementedError):
-            runner.invoke(main, ["status"], catch_exceptions=False)
+        result = runner.invoke(
+            main,
+            ["--config", "/nonexistent/path/config.yaml", "status"],
+            catch_exceptions=False,
+        )
+    assert result.exit_code != 0
+    assert "Error" in (result.output + (result.stderr if hasattr(result, "stderr") else ""))
 
 
 def test_cleanup_subcommand_raises_not_implemented(runner: CliRunner) -> None:
