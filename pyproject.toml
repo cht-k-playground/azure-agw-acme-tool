@@ -36,6 +36,7 @@ dependencies = [
     "cryptography>=41.0",
     "azure-identity>=1.15.0",
     "azure-mgmt-network>=25.0",
+    "azure-mgmt-web>=3.0",
     "rich>=13.0",
     "requests>=2.31.0",
 ]

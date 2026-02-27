@@ -124,6 +124,8 @@
   **實作細節**：
   - `AcmeClient` 類別，使用 `acme.client.ClientV2` 與 `josepy.JWKRSA` 作為帳號金鑰（`acme>=2.7.0`）
   - 公開方法：
+    - `register_account(email: str, account_key_path: Path) -> str`
+      向 ACME CA 註冊帳號，回傳帳號 URL；若 `account_key_path` 已存在則直接載入，不重新產生
     - `new_order(domains: list[str]) -> Order`
     - `get_http01_challenge(order: Order, domain: str) -> tuple[str, str]`
       回傳 `(token, key_authorization)`
@@ -345,7 +347,7 @@
   2. 步驟 14（刪除暫時性 Routing Rule）即使在步驟 7-13 發生例外時仍會被執行（finally block 或等效機制）。
   3. PFX 的隨機密碼不出現在任何日誌輸出或磁碟檔案中。
   4. 單元測試模擬所有 14 步，確認每步驟的呼叫順序與參數正確。
-  5. 整合測試使用 Let's Encrypt Staging + 模擬 AGW SDK 呼叫，確認完整流程通過。
+  5. 【手動驗證】使用 Let's Encrypt Staging 環境與真實 Azure Application Gateway 執行端對端測試，確認完整 14 步流程通過。此項目不在自動化 CI 範疇內。
 
 ---
 
@@ -369,7 +371,7 @@
   2. 第 2 個 domain 在步驟 7 發生 `AcmeError` 時，第 3、4、5 個 domains 仍繼續處理。
   3. 批次完成後輸出包含 `Total`、`Succeeded`、`Failed`、`Duration` 四個數值，且數字加總正確（`Succeeded + Failed == Total`）。
   4. 失敗 domain 的錯誤訊息出現在最終摘要中，包含 domain 名稱與例外訊息。
-  5. 整合測試行覆蓋率 ≥80%，至少包含「全部成功」與「部分失敗」兩種情境。
+  5. 單元測試行覆蓋率 ≥80%，至少包含「全部成功」與「部分失敗」兩種情境；端對端批次流程為【手動驗證】，不在自動化 CI 範疇內。
 
 ---
 
@@ -467,4 +469,4 @@
 - **測試覆蓋率**：每個變更後 `src/az_acme_tool/` 的行覆蓋率必須維持 **≥80%**。
 - **安全性**：任何 committed 程式碼或測試 fixtures 中不得出現 secrets、私鑰或憑證材料。私鑰檔案必須以 `0o600` 權限建立。任何層級的日誌均不得記錄 secrets。
 - **例外處理**：使用結構化例外 — 每個模組定義自訂例外類別。所有 Azure SDK 呼叫必須顯式處理 `HttpResponseError`。ACME 操作必須實作指數退避重試（最多 3 次）。
-- **依賴管理**：新的 runtime 依賴加入 `pyproject.toml` 的 `[project.dependencies]`；開發依賴加入 `[project.optional-dependencies] dev`；不使用 `requirements.txt`。
+- **依賴管理**：新的 runtime 依賴加入 `pyproject.toml` 的 `[project.dependencies]`；開發依賴加入 `[project.optional-dependencies] dev`；主應用程式不使用 `requirements.txt`。**例外**：`azure-function/requirements.txt` 是唯一被允許的 `requirements.txt`，由 Azure Functions runtime 部署所需，與 `pyproject.toml` 分開維護，不由 uv 管理。

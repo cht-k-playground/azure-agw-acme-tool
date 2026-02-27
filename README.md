@@ -9,6 +9,10 @@ Azure Application Gateway ACME automated certificate management tool.
 ## Installation
 
 ```bash
+# Using uv (recommended)
+uv tool install az-acme-tool
+
+# Using pip
 pip install az-acme-tool
 ```
 
@@ -17,23 +21,29 @@ Or from source:
 ```bash
 git clone https://github.com/your-org/az-acme-tool.git
 cd az-acme-tool
-pip install -e .
+uv sync --extra dev
 ```
 
 ## Quick Start
 
 ```bash
-# Initialize ACME account
-az-acme-tool init --email admin@example.com
+# Print a config file template to get started
+az-acme-tool init --config-template
 
-# Issue certificates for all configured gateways
-az-acme-tool issue --config config.yaml
+# Initialize ACME account (reads from default config path)
+az-acme-tool init
+
+# Issue certificates for all configured gateways (uses default config path)
+az-acme-tool issue
 
 # Check certificate status
-az-acme-tool status --config config.yaml
+az-acme-tool status
 
 # Renew expiring certificates (within 30 days)
-az-acme-tool renew --config config.yaml
+az-acme-tool renew
+
+# Use a custom config path
+az-acme-tool --config /path/to/config.yaml status
 ```
 
 ## Commands
@@ -47,6 +57,8 @@ az-acme-tool renew --config config.yaml
 | `cleanup` | Clean up temporary ACME challenge routing rules  |
 
 ## Configuration
+
+The default config path is `~/.config/az-acme-tool/config.yaml`. Use `--config` on the root command to override it. Use `az-acme-tool init --config-template` to print a starter template.
 
 ```yaml
 acme:
@@ -76,6 +88,6 @@ gateways:
 ## Development
 
 ```bash
-pip install -e ".[dev]"
+uv sync --extra dev
 pytest
 ```
