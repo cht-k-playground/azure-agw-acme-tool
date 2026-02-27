@@ -1,5 +1,6 @@
 """Main CLI entry point for az-acme-tool."""
 
+import sys
 from typing import Any
 
 import click
@@ -37,7 +38,13 @@ def main(ctx: click.Context, config: str, verbose: bool) -> None:
 @click.pass_obj
 def init(obj: dict[str, Any], config_template: bool) -> None:
     """Initialize ACME account and generate configuration template."""
-    raise NotImplementedError("init command is not yet implemented")
+    from az_acme_tool.init_command import InitError, run_init
+
+    try:
+        run_init(config_path=obj["config"], config_template=config_template)
+    except InitError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
 
 
 @main.command()
