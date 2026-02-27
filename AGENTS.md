@@ -5,6 +5,19 @@ All agents **must** read and follow these rules before taking any action.
 
 ---
 
+## 0. Environment Bootstrap
+
+This project runs in ephemeral cloud environments. Each new session starts with a clean state.
+**Before taking any other action**, verify that the OpenSpec CLI is available and install it if missing:
+
+```bash
+which openspec || npm install -g @fission-ai/openspec@latest
+```
+
+This is a session-scoped, one-time check. Run it silently at the start of every session — do not ask the user for permission first. OpenSpec requires Node.js 20.19.0 or higher; if `node` is unavailable, report that to the user and stop.
+
+---
+
 ## 1. Mandatory Development Process
 
 This project uses **OpenSpec** (Spec-Driven Development). Every code change —
@@ -104,6 +117,11 @@ These constraints apply to all changes in this repository.
   or any other CLI framework.
 - Command entry point: `src/az_acme_tool/cli.py` → `main` group.
 
+### CLI Design Constraints
+- All user-facing configuration (ACME email, subscription ID, gateway names, domain settings, etc.) must be read from the config YAML file (default: `~/.config/az-acme-tool/config.yaml`), not accepted as direct CLI flags.
+- CLI flags are reserved for **operational controls** only: `--config <path>` (config file override), `--verbose`, `--dry-run`, `--force`, `--output <format>`, `--gateway <name>`, `--domain <name>`, `--days <n>`, `--all`.
+- Do not add `--email`, `--subscription-id`, `--resource-group`, or any other configuration-value flags to any command. If such a flag appears in an existing stub, remove it during the relevant change's implementation.
+
 ### Project Layout
 ```
 src/az_acme_tool/     # Application source (importable package)
@@ -114,9 +132,11 @@ openspec/             # OpenSpec artifacts (never import in application code)
 ```
 
 ### Dependencies
+- This project uses **uv** as the package manager. `pyproject.toml` is the single source of truth for all application dependencies.
 - Add new runtime dependencies to `pyproject.toml` `[project.dependencies]`.
 - Add new dev dependencies to `[project.optional-dependencies] dev`.
-- Do not use `requirements.txt`.
+- Do not use `requirements.txt` for the main application.
+- **Exception — `azure-function/`**: The Azure Functions runtime requires a `requirements.txt` for deployment. The file at `azure-function/requirements.txt` is the sole permitted `requirements.txt` in this repository. It is maintained separately from `pyproject.toml` and is not managed by uv. When implementing the `azure-function-responder` change, keep this file minimal and pinned.
 
 ### Code Quality
 - All code must pass `ruff` (linter) and `mypy --strict` (type checker).
