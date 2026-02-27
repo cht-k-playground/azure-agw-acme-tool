@@ -78,6 +78,15 @@ crystallizes into a decision, exit explore mode and start a new change.
 7. **One active change at a time.** Do not start a new proposal while another
    change is in-progress unless the user explicitly scopes the work.
 
+8. **Verify before archive.** `/opsx:verify [name]` must be run after `/opsx:apply` completes.
+   All findings — **critical**, **warning**, and **suggestion** — must be resolved before
+   proceeding to `/opsx:archive`. Do not archive a change that has unresolved verify findings.
+
+9. **Escalate verify ambiguity.** If resolving a verify finding introduces design uncertainty
+   or requires a decision that is not clear from the existing artifacts, **stop and raise it
+   with the user** before making any code change. Do not guess or unilaterally resolve
+   ambiguous findings.
+
 ---
 
 ## 3. Artifact Rules

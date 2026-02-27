@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 import logging as _stdlib_logging
 from collections.abc import Generator
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from az_acme_tool.logging import setup_logging
+from az_acme_tool.logging import RichConsoleHandler, setup_logging
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -75,6 +76,13 @@ def test_info_record_written_as_json_lines(log_file: Path) -> None:
     assert record["level"] == "INFO"
     assert record["message"] == test_message
 
+    # Validate timestamp is ISO 8601 UTC format
+    ts = record["timestamp"]
+    assert isinstance(ts, str), f"timestamp must be a string, got {type(ts)}"
+    assert ts.endswith("Z") or ts.endswith("+00:00"), f"Unexpected timestamp format: {ts}"
+    # Verify it is parseable as a datetime
+    datetime.fromisoformat(ts.replace("Z", "+00:00"))  # should not raise
+
 
 # ---------------------------------------------------------------------------
 # Task 4.2 — DEBUG record NOT written when verbose=False
@@ -85,11 +93,15 @@ def test_debug_record_absent_when_not_verbose(log_file: Path) -> None:
     """setup_logging(verbose=False) does NOT write DEBUG records to the log file."""
     setup_logging(verbose=False)
 
+    root = _stdlib_logging.getLogger()
+    assert (
+        root.level == _stdlib_logging.INFO
+    ), f"Expected root logger level INFO ({_stdlib_logging.INFO}), got {root.level}"
+
     logger = _stdlib_logging.getLogger("test.debug_absent")
     debug_message = "this is a debug message that should not appear"
     logger.debug(debug_message)
 
-    root = _stdlib_logging.getLogger()
     for handler in root.handlers:
         handler.flush()
 
@@ -106,6 +118,11 @@ def test_debug_record_absent_when_not_verbose(log_file: Path) -> None:
 def test_debug_record_present_when_verbose(log_file: Path) -> None:
     """setup_logging(verbose=True) writes DEBUG records to the log file."""
     setup_logging(verbose=True)
+
+    root = _stdlib_logging.getLogger()
+    assert (
+        root.level == _stdlib_logging.DEBUG
+    ), f"Expected root logger level DEBUG ({_stdlib_logging.DEBUG}), got {root.level}"
 
     logger = _stdlib_logging.getLogger("test.debug_present")
     debug_message = "verbose debug message that should appear"
@@ -136,7 +153,7 @@ def test_rich_console_prints_non_json_for_info(log_file: Path) -> None:
 
     mock_console = MagicMock()
 
-    def capture_print(msg: str, **kwargs: object) -> None:  # noqa: ARG001
+    def capture_print(msg: str, **kwargs: object) -> None:
         printed_messages.append(str(msg))
 
     mock_console.print.side_effect = capture_print
@@ -174,7 +191,7 @@ def test_rich_console_does_not_receive_debug_when_not_verbose(log_file: Path) ->
 
     mock_console = MagicMock()
 
-    def capture_print(msg: str, **kwargs: object) -> None:  # noqa: ARG001
+    def capture_print(msg: str, **kwargs: object) -> None:
         printed_messages.append(str(msg))
 
     mock_console.print.side_effect = capture_print
@@ -205,7 +222,7 @@ def test_rich_console_receives_debug_when_verbose(log_file: Path) -> None:
 
     mock_console = MagicMock()
 
-    def capture_print(msg: str, **kwargs: object) -> None:  # noqa: ARG001
+    def capture_print(msg: str, **kwargs: object) -> None:
         printed_messages.append(str(msg))
 
     mock_console.print.side_effect = capture_print
@@ -225,3 +242,29 @@ def test_rich_console_receives_debug_when_verbose(log_file: Path) -> None:
     assert (
         matching
     ), f"DEBUG message was not emitted to the console when verbose=True. Got: {printed_messages}"
+
+
+# ---------------------------------------------------------------------------
+# Task 4.7 — RichConsoleHandler.emit() calls handleError on print exception
+# ---------------------------------------------------------------------------
+
+
+def test_rich_console_handler_emit_calls_handle_error_on_exception(
+    mocker: pytest.MockerFixture,
+) -> None:
+    """RichConsoleHandler.emit() calls handleError when Console.print raises."""
+    handler = RichConsoleHandler()
+    mocker.patch.object(handler._console, "print", side_effect=Exception("boom"))
+    handle_error_mock = mocker.patch.object(handler, "handleError")
+
+    record = _stdlib_logging.LogRecord(
+        name="test",
+        level=_stdlib_logging.INFO,
+        pathname="",
+        lineno=0,
+        msg="test message",
+        args=(),
+        exc_info=None,
+    )
+    handler.emit(record)  # should not raise
+    handle_error_mock.assert_called_once_with(record)

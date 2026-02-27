@@ -381,6 +381,57 @@ def test_all_auth_method_values_accepted(
 
 
 # ---------------------------------------------------------------------------
+# S-2a — empty gateways list raises ConfigError
+# ---------------------------------------------------------------------------
+
+
+def test_empty_gateways_raises_config_error(tmp_path: Path) -> None:
+    """parse_config() raises ConfigError when gateways is an empty list."""
+    data: dict[str, Any] = {
+        "acme": {"email": "test@example.com"},
+        "azure": {
+            "subscription_id": "12345678-1234-1234-1234-123456789012",
+            "resource_group": "my-rg",
+            "auth_method": "default",
+        },
+        "gateways": [],
+    }
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(yaml.dump(data), encoding="utf-8")
+
+    with pytest.raises(ConfigError):
+        parse_config(config_file)
+
+
+# ---------------------------------------------------------------------------
+# S-2b — gateway with empty domains list raises ConfigError
+# ---------------------------------------------------------------------------
+
+
+def test_empty_domains_raises_config_error(tmp_path: Path) -> None:
+    """parse_config() raises ConfigError when a gateway's domains is an empty list."""
+    data: dict[str, Any] = {
+        "acme": {"email": "test@example.com"},
+        "azure": {
+            "subscription_id": "12345678-1234-1234-1234-123456789012",
+            "resource_group": "my-rg",
+            "auth_method": "default",
+        },
+        "gateways": [
+            {
+                "name": "my-agw",
+                "domains": [],
+            }
+        ],
+    }
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(yaml.dump(data), encoding="utf-8")
+
+    with pytest.raises(ConfigError):
+        parse_config(config_file)
+
+
+# ---------------------------------------------------------------------------
 # Task 5.15 — cert_store: agw_direct is accepted and maps to CertStore.agw_direct
 # ---------------------------------------------------------------------------
 

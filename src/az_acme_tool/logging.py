@@ -85,7 +85,7 @@ class RichConsoleHandler(_logging.Handler):
         try:
             msg = self.format(record)
             self._console.print(msg)
-        except Exception:  # noqa: BLE001
+        except Exception:
             self.handleError(record)
 
 
