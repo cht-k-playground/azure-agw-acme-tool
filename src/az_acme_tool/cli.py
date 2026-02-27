@@ -105,7 +105,13 @@ def renew(obj: dict[str, Any], days: int, force: bool) -> None:
 @click.pass_obj
 def status(obj: dict[str, Any], output_format: str) -> None:
     """Query certificate status and expiry information."""
-    raise NotImplementedError("status command is not yet implemented")
+    from az_acme_tool.status_command import StatusError, run_status
+
+    try:
+        run_status(config_path=obj["config"], output_format=output_format)
+    except StatusError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
 
 
 @main.command()
