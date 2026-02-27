@@ -12,24 +12,32 @@ no matter how small — must originate from an OpenSpec change artifact.
 
 **No code may be written without a corresponding OpenSpec change.**
 
-### The only permitted workflow is:
+### The preferred workflow is:
 
 ```
-/opsx:propose  →  /opsx:apply  →  /opsx:archive
+/opsx:new  →  /opsx:ff  →  /opsx:apply  →  /opsx:verify  →  /opsx:archive
 ```
 
 | Step | Command | What happens |
 |------|---------|--------------|
-| Plan | `/opsx:propose <name>` | Creates `proposal.md`, `design.md`, `tasks.md` under `openspec/changes/<name>/` |
+| Scaffold | `/opsx:new <name>` | Creates `openspec/changes/<name>/` scaffold with `.openspec.yaml` |
+| Plan | `/opsx:ff [name]` | Generates all planning artifacts in dependency order (`proposal.md`, `specs/`, `design.md`, `tasks.md`) |
 | Implement | `/opsx:apply [name]` | Implements tasks from the change artifacts, marks tasks complete |
+| Verify | `/opsx:verify [name]` | Validates implementation against artifacts (Completeness / Correctness / Coherence) |
 | Finalize | `/opsx:archive [name]` | Archives the change, syncs delta specs to `openspec/specs/` |
+
+> **Shortcut**: `/opsx:propose <name>` combines Scaffold + Plan into one step. Use it for quick, well-scoped changes where you don't need to review artifacts before proceeding to implementation.
+
+### Step-by-step artifact control
+
+Use `/opsx:continue [name]` instead of `/opsx:ff` when you want to create and review one artifact at a time before proceeding to the next.
 
 ### When to use `/opsx:explore`
 
 Use `/opsx:explore` **only for thinking and investigation** — reading code,
 comparing options, clarifying requirements.  
 `/opsx:explore` must **never** produce code changes. When exploration
-crystallizes into a decision, exit explore mode and start a proposal.
+crystallizes into a decision, exit explore mode and start a new change.
 
 ---
 
@@ -102,7 +110,7 @@ src/az_acme_tool/     # Application source (importable package)
 tests/                # pytest test suite
 pyproject.toml        # Single source of truth for deps and tooling
 openspec/             # OpenSpec artifacts (never import in application code)
-.kilocode/            # Kilo Code skills and workflows (do not edit manually)
+.kilocode/            # Kilo Code skills and workflows
 ```
 
 ### Dependencies
@@ -137,7 +145,7 @@ openspec/             # OpenSpec artifacts (never import in application code)
 ## 5. OpenSpec CLI Reference (Quick Cheat-Sheet)
 
 ```bash
-# Create a new change with all planning artifacts
+# Create a new change scaffold
 openspec new change "<name>"
 
 # Check artifact readiness for a change
@@ -158,6 +166,21 @@ openspec archive "<name>"
 
 Artifact IDs for the `spec-driven` schema: `proposal`, `specs`, `design`, `tasks`.
 
+### Slash Command Reference
+
+| Command | Purpose |
+|---------|---------|
+| `/opsx:explore` | Think through ideas before committing to a change |
+| `/opsx:new <name>` | Create a new change scaffold |
+| `/opsx:ff [name]` | Fast-forward: generate all planning artifacts at once |
+| `/opsx:continue [name]` | Create the next artifact one at a time (step-by-step) |
+| `/opsx:apply [name]` | Implement tasks from the change |
+| `/opsx:verify [name]` | Validate implementation matches artifacts |
+| `/opsx:sync [name]` | Merge delta specs to `openspec/specs/` without archiving |
+| `/opsx:archive [name]` | Archive a completed change |
+| `/opsx:bulk-archive` | Archive multiple completed changes at once |
+| `/opsx:propose <name>` | Shortcut: scaffold + fast-forward in one step |
+
 ---
 
 ## 6. What an Agent Should Do When Asked to "Just Fix" Something
@@ -165,7 +188,7 @@ Artifact IDs for the `spec-driven` schema: `proposal`, `specs`, `design`, `tasks
 If a user says "just fix this bug" or "quickly add X":
 
 1. Acknowledge the request.
-2. Run `/opsx:propose <descriptive-name>` to create a minimal change.
+2. Run `/opsx:new <descriptive-name>` then `/opsx:ff` (or `/opsx:propose <descriptive-name>` as a one-step shortcut) to create a minimal change.
 3. Keep `proposal.md` concise (the fix description is the why).
 4. Proceed to `/opsx:apply` immediately after artifacts are ready.
 5. Do not skip the proposal step even for one-line fixes.
