@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "az-acme-tool"
+version = "0.1.0"
+description = "Azure Application Gateway ACME automated certificate management tool"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "az-acme-tool contributors" }
+]
+keywords = ["azure", "acme", "certificate", "application-gateway", "letsencrypt", "cli"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: Name Service (DNS)",
+    "Topic :: Security :: Cryptography",
+    "Topic :: System :: Systems Administration",
+]
+dependencies = [
+    "click>=8.1.0",
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+    "acme>=2.7.0",
+    "josepy>=1.14.0",
+    "cryptography>=41.0",
+    "azure-identity>=1.15.0",
+    "azure-mgmt-network>=25.0",
+    "rich>=13.0",
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-mock>=3.11.0",
+    "black>=23.0",
+    "mypy>=1.5.0",
+    "ruff>=0.1.0",
+    "pytest-cov>=4.0",
+]
+
+[project.scripts]
+az-acme-tool = "az_acme_tool.cli:main"
+
+[project.urls]
+Repository = "https://github.com/your-org/az-acme-tool"
+"Bug Tracker" = "https://github.com/your-org/az-acme-tool/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=az_acme_tool --cov-report=term-missing"
