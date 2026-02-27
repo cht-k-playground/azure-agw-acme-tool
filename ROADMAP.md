@@ -25,7 +25,7 @@
 
 ---
 
-- [ ] `config-schema` — 定義並驗證 YAML 設定模型
+- [x] `config-schema` — 定義並驗證 YAML 設定模型
 
   **Dependencies**：無（此為起始點）
 
@@ -47,7 +47,7 @@
 
 ---
 
-- [ ] `logging-setup` — 結構化日誌與主控台輸出基礎設施
+- [x] `logging-setup` — 結構化日誌與主控台輸出基礎設施
 
   **Dependencies**：無（此為起始點）
 
@@ -72,7 +72,7 @@
 
 ---
 
-- [ ] `azure-gateway-client` — Azure SDK 的 Application Gateway 操作封裝
+- [x] `azure-gateway-client` — Azure SDK 的 Application Gateway 操作封裝
 
   **Dependencies**：`config-schema`、`logging-setup`
 
@@ -117,7 +117,7 @@
 
 ---
 
-- [ ] `acme-client` — ACME HTTP-01 challenge 客戶端
+- [x] `acme-client` — ACME HTTP-01 challenge 客戶端
 
   **Dependencies**：`config-schema`、`logging-setup`
 
@@ -149,7 +149,7 @@
 
 ---
 
-- [ ] `cert-converter` — PEM → PFX 轉換與憑證工具函數
+- [x] `cert-converter` — PEM → PFX 轉換與憑證工具函數
 
   **Dependencies**：`config-schema`、`logging-setup`
 
@@ -175,7 +175,7 @@
 
 ---
 
-- [ ] `cli-init` — 實作 `init` 命令
+- [x] `cli-init` — 實作 `init` 命令
 
   **Dependencies**：`config-schema`、`logging-setup`、`acme-client`
 
@@ -196,7 +196,7 @@
 
 ---
 
-- [ ] `cli-issue` — 實作 `issue` 命令（協調層）
+- [x] `cli-issue` — 實作 `issue` 命令（協調層）
 
   **Dependencies**：`config-schema`、`logging-setup`、`azure-gateway-client`、`acme-client`
 
@@ -238,7 +238,7 @@
 
 ---
 
-- [ ] `cli-status` — 實作 `status` 命令
+- [x] `cli-status` — 實作 `status` 命令
 
   **Dependencies**：`azure-gateway-client`、`cert-converter`
 
