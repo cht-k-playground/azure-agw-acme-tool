@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: CLI subcommand smoke tests reflect implemented state
 The test suite SHALL verify that `init`, `issue`, and `status` subcommands do not raise `NotImplementedError` when invoked. Tests that previously asserted `NotImplementedError` for these commands SHALL be replaced with tests that confirm the commands are reachable and handle errors gracefully (e.g., missing config file produces a non-zero exit code rather than an unhandled exception).
