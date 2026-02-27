@@ -59,7 +59,18 @@ def init(obj: dict[str, Any], config_template: bool) -> None:
 @click.pass_obj
 def issue(obj: dict[str, Any], gateway: str | None, domain: str | None, dry_run: bool) -> None:
     """Issue and deploy certificates for configured domains."""
-    raise NotImplementedError("issue command is not yet implemented")
+    from az_acme_tool.issue_command import IssueError, run_issue
+
+    try:
+        run_issue(
+            config_path=obj["config"],
+            gateway=gateway,
+            domain=domain,
+            dry_run=dry_run,
+        )
+    except IssueError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
 
 
 @main.command()
