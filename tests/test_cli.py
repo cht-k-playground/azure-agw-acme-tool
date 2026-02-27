@@ -134,11 +134,16 @@ def test_issue_subcommand_missing_config(runner: CliRunner) -> None:
     assert "Error" in (result.output + (result.stderr if hasattr(result, "stderr") else ""))
 
 
-def test_renew_subcommand_raises_not_implemented(runner: CliRunner) -> None:
-    """renew subcommand raises NotImplementedError (not yet implemented)."""
+def test_renew_subcommand_missing_config(runner: CliRunner) -> None:
+    """renew subcommand exits non-zero with an error message when config is missing."""
     with patch("az_acme_tool.cli.setup_logging"):
-        with pytest.raises(NotImplementedError):
-            runner.invoke(main, ["renew"], catch_exceptions=False)
+        result = runner.invoke(
+            main,
+            ["--config", "/nonexistent/path/config.yaml", "renew"],
+            catch_exceptions=False,
+        )
+    assert result.exit_code != 0
+    assert "Error" in (result.output + (result.stderr if hasattr(result, "stderr") else ""))
 
 
 def test_status_subcommand_missing_config(runner: CliRunner) -> None:

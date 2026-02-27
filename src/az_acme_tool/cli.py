@@ -74,6 +74,8 @@ def issue(obj: dict[str, Any], gateway: str | None, domain: str | None, dry_run:
 
 
 @main.command()
+@click.option("--gateway", default=None, help="Process only the specified gateway.")
+@click.option("--domain", default=None, help="Process only the specified domain.")
 @click.option(
     "--days",
     default=30,
@@ -88,9 +90,23 @@ def issue(obj: dict[str, Any], gateway: str | None, domain: str | None, dry_run:
     help="Force renewal of all certificates regardless of expiry.",
 )
 @click.pass_obj
-def renew(obj: dict[str, Any], days: int, force: bool) -> None:
+def renew(
+    obj: dict[str, Any], gateway: str | None, domain: str | None, days: int, force: bool
+) -> None:
     """Renew certificates that are expiring soon."""
-    raise NotImplementedError("renew command is not yet implemented")
+    from az_acme_tool.renew_command import RenewError, run_renew
+
+    try:
+        run_renew(
+            config_path=obj["config"],
+            gateway=gateway,
+            domain=domain,
+            days=days,
+            force=force,
+        )
+    except RenewError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
 
 
 @main.command()
