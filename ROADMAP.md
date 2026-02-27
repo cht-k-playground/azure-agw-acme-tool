@@ -218,7 +218,7 @@
 
 ---
 
-- [ ] `cli-renew` — 實作 `renew` 命令
+- [x] `cli-renew` — 實作 `renew` 命令
 
   **Dependencies**：`cli-issue`、`azure-gateway-client`、`cert-converter`
 
