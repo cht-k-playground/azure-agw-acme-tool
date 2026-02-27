@@ -85,6 +85,8 @@ crystallizes into a decision, exit explore mode and start a new change.
    with the user** before making any code change. Do not guess or unilaterally resolve
    ambiguous findings.
 
+10. **Push after every commit.** This project runs on ephemeral cloud agents — local commits are lost when a session ends. After every `git commit`, immediately run `git push` to the remote tracking branch. No commit may be left unpushed at the end of any operation.
+
 ---
 
 ## 3. Artifact Rules
