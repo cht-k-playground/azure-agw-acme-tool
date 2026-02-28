@@ -7,6 +7,7 @@ or network access are required.
 from __future__ import annotations
 
 import base64
+import logging
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
@@ -119,10 +120,13 @@ def mock_network_client() -> MagicMock:
 
 @pytest.fixture()
 def client(mock_credential: MagicMock, mock_network_client: MagicMock) -> AzureGatewayClient:
-    """AzureGatewayClient with a patched NetworkManagementClient."""
-    with patch(
-        "az_acme_tool.azure_gateway.NetworkManagementClient",
-        return_value=mock_network_client,
+    """AzureGatewayClient with patched NetworkManagementClient and WebSiteManagementClient."""
+    with (
+        patch(
+            "az_acme_tool.azure_gateway.NetworkManagementClient",
+            return_value=mock_network_client,
+        ),
+        patch("az_acme_tool.azure_gateway.WebSiteManagementClient"),
     ):
         return AzureGatewayClient(
             subscription_id="00000000-0000-0000-0000-000000000001",
@@ -142,9 +146,10 @@ class TestAzureGatewayClientInit:
         self, mock_credential: MagicMock
     ) -> None:
         """NetworkManagementClient receives the injected credential and subscription_id."""
-        with patch(
-            "az_acme_tool.azure_gateway.NetworkManagementClient"
-        ) as mock_cls:
+        with (
+            patch("az_acme_tool.azure_gateway.NetworkManagementClient") as mock_cls,
+            patch("az_acme_tool.azure_gateway.WebSiteManagementClient"),
+        ):
             AzureGatewayClient(
                 subscription_id="sub-123",
                 resource_group="rg",
@@ -511,3 +516,97 @@ class TestDeleteRoutingRule:
 
         with pytest.raises(AzureGatewayError, match="Failed to delete path rule"):
             client.delete_routing_rule("acme-challenge-www-example-com-1709030400")
+
+
+# ---------------------------------------------------------------------------
+# update_function_app_settings tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def mock_web_client() -> MagicMock:
+    return MagicMock()
+
+
+@pytest.fixture()
+def client_with_web(
+    mock_credential: MagicMock,
+    mock_network_client: MagicMock,
+    mock_web_client: MagicMock,
+) -> AzureGatewayClient:
+    """AzureGatewayClient with both NetworkManagementClient and WebSiteManagementClient patched."""
+    with (
+        patch(
+            "az_acme_tool.azure_gateway.NetworkManagementClient",
+            return_value=mock_network_client,
+        ),
+        patch(
+            "az_acme_tool.azure_gateway.WebSiteManagementClient",
+            return_value=mock_web_client,
+        ),
+    ):
+        return AzureGatewayClient(
+            subscription_id="00000000-0000-0000-0000-000000000001",
+            resource_group="my-rg",
+            gateway_name="my-gw",
+            credential=mock_credential,
+        )
+
+
+class TestUpdateFunctionAppSettings:
+    def test_calls_update_application_settings_with_correct_args(
+        self,
+        client_with_web: AzureGatewayClient,
+        mock_web_client: MagicMock,
+    ) -> None:
+        """Calls WebSiteManagementClient.web_apps.update_application_settings with correct args."""
+        settings = {"ACME_CHALLENGE_RESPONSE": "TOKEN.KEY_AUTH"}
+
+        client_with_web.update_function_app_settings(
+            function_app_name="my-func-app",
+            settings=settings,
+        )
+
+        mock_web_client.web_apps.update_application_settings.assert_called_once()
+        call_kwargs = mock_web_client.web_apps.update_application_settings.call_args
+        assert call_kwargs.kwargs["resource_group_name"] == "my-rg"
+        assert call_kwargs.kwargs["name"] == "my-func-app"
+        # Verify the StringDictionary properties contain the settings
+        string_dict = call_kwargs.kwargs["app_settings"]
+        assert string_dict.properties == settings
+
+    def test_setting_values_not_in_log_output(
+        self,
+        client_with_web: AzureGatewayClient,
+        mock_web_client: MagicMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Setting values (key authorization) must not appear in any log output."""
+        secret_value = "SUPER_SECRET_KEY_AUTH_VALUE"
+        settings = {"ACME_CHALLENGE_RESPONSE": secret_value}
+
+        with caplog.at_level(logging.DEBUG, logger="az_acme_tool.azure_gateway"):
+            client_with_web.update_function_app_settings(
+                function_app_name="my-func-app",
+                settings=settings,
+            )
+
+        assert secret_value not in caplog.text
+
+    def test_raises_azure_gateway_error_on_api_failure(
+        self,
+        client_with_web: AzureGatewayClient,
+        mock_web_client: MagicMock,
+    ) -> None:
+        """Raises AzureGatewayError when WebSiteManagementClient raises HttpResponseError."""
+        mock_web_client.web_apps.update_application_settings.side_effect = (
+            HttpResponseError(message="Unauthorized")
+        )
+
+        with pytest.raises(
+            AzureGatewayError, match="Failed to update Application Settings"
+        ):
+            client_with_web.update_function_app_settings(
+                function_app_name="my-func-app",
+                settings={"ACME_CHALLENGE_RESPONSE": "value"},
+            )

@@ -1,11 +1,14 @@
 """Azure Application Gateway client for TLS certificate management.
 
-Provides a typed wrapper around the ``azure-mgmt-network`` SDK for three
-operations:
+Provides a typed wrapper around the ``azure-mgmt-network`` SDK for the
+following operations:
 
-- ``list_certificates()``        — enumerate SSL certificates on a gateway
-- ``get_certificate_expiry()``   — read the expiry datetime of a named cert
-- ``update_listener_certificate()`` — point a gateway listener at a cert
+- ``list_certificates()``              — enumerate SSL certificates on a gateway
+- ``get_certificate_expiry()``         — read the expiry datetime of a named cert
+- ``update_listener_certificate()``    — point a gateway listener at a cert
+- ``list_acme_challenge_rules()``      — list orphaned ACME challenge path rules
+- ``delete_routing_rule()``            — remove a named path rule
+- ``update_function_app_settings()``   — write App Settings to an Azure Function
 
 All Azure SDK errors are translated to :class:`AzureGatewayError`.
 """
@@ -21,6 +24,8 @@ from azure.core.credentials import TokenCredential
 from azure.core.exceptions import HttpResponseError
 from azure.mgmt.network import NetworkManagementClient
 from azure.mgmt.network.models import ApplicationGateway, SubResource
+from azure.mgmt.web import WebSiteManagementClient
+from azure.mgmt.web.models import StringDictionary
 from cryptography import x509
 
 logger = logging.getLogger(__name__)
@@ -67,6 +72,10 @@ class AzureGatewayClient:
         self._resource_group = resource_group
         self._gateway_name = gateway_name
         self._network_client = NetworkManagementClient(
+            credential=credential,
+            subscription_id=subscription_id,
+        )
+        self._web_client = WebSiteManagementClient(
             credential=credential,
             subscription_id=subscription_id,
         )
@@ -346,4 +355,43 @@ class AzureGatewayClient:
             raise AzureGatewayError(
                 f"Failed to delete path rule '{rule_name}' on Application Gateway "
                 f"'{self._gateway_name}': {exc}"
+            ) from exc
+
+    def update_function_app_settings(
+        self, function_app_name: str, settings: dict[str, str]
+    ) -> None:
+        """Update Application Settings on an Azure Function App.
+
+        Merges the provided key-value pairs into the Function App's existing
+        Application Settings using the ``azure-mgmt-web`` SDK.
+
+        Parameters
+        ----------
+        function_app_name:
+            Name of the Azure Function App resource.
+        settings:
+            Dictionary of setting key-value pairs to write.  Values are
+            **never** logged — only key names may appear in log output.
+
+        Raises
+        ------
+        AzureGatewayError
+            If the Azure API call fails.
+        """
+        logger.info(
+            "Updating Function App '%s' settings: keys=%s",
+            function_app_name,
+            list(settings.keys()),
+        )
+
+        try:
+            self._web_client.web_apps.update_application_settings(
+                resource_group_name=self._resource_group,
+                name=function_app_name,
+                app_settings=StringDictionary(properties=settings),
+            )
+        except HttpResponseError as exc:
+            raise AzureGatewayError(
+                f"Failed to update Application Settings on Function App "
+                f"'{function_app_name}': {exc}"
             ) from exc

@@ -1,0 +1,4 @@
+# Azure Functions runtime dependency.
+# This file is maintained separately from pyproject.toml and is not managed by uv.
+# It is required by the Azure Functions deployment runtime.
+azure-functions==1.21.3
