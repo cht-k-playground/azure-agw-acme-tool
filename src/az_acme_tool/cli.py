@@ -136,9 +136,15 @@ def status(obj: dict[str, Any], output_format: str) -> None:
     "cleanup_all",
     is_flag=True,
     default=False,
-    help="Clean up all temporary routing rules.",
+    help="Remove all orphaned ACME challenge routing rules without prompting.",
 )
 @click.pass_obj
 def cleanup(obj: dict[str, Any], cleanup_all: bool) -> None:
-    """Clean up temporary ACME challenge routing rules left from interrupted runs."""
-    raise NotImplementedError("cleanup command is not yet implemented")
+    """Remove orphaned ACME challenge routing rules left from interrupted runs."""
+    from az_acme_tool.cleanup_command import CleanupError, run_cleanup
+
+    try:
+        run_cleanup(config_path=obj["config"], cleanup_all=cleanup_all)
+    except CleanupError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)

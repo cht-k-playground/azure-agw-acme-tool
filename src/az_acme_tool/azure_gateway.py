@@ -268,3 +268,82 @@ class AzureGatewayClient:
                 f"Failed to update listener '{listener_name}' on Application Gateway "
                 f"'{self._gateway_name}': {exc}"
             ) from exc
+
+    def list_acme_challenge_rules(self) -> list[str]:
+        """Return names of all URL path map rules prefixed with ``acme-challenge-``.
+
+        Scans every URL path map on the Application Gateway and collects the
+        names of path rules whose names begin with ``acme-challenge-``.
+
+        Returns
+        -------
+        list[str]
+            Possibly-empty list of matching rule names.
+
+        Raises
+        ------
+        AzureGatewayError
+            If the Azure API call fails.
+        """
+        gateway = self._get_gateway()
+        url_path_maps = gateway.url_path_maps or []
+        matching: list[str] = []
+        for upm in url_path_maps:
+            for rule in upm.path_rules or []:
+                if rule.name and rule.name.startswith("acme-challenge-"):
+                    matching.append(rule.name)
+        return matching
+
+    def delete_routing_rule(self, rule_name: str) -> None:
+        """Remove a named path rule from all URL path maps on the gateway.
+
+        Fetches the current Application Gateway configuration, removes every
+        occurrence of *rule_name* from all URL path maps, and pushes the
+        updated configuration back to ARM.
+
+        Parameters
+        ----------
+        rule_name:
+            Name of the path rule to delete.
+
+        Raises
+        ------
+        AzureGatewayError
+            If the rule is not found in any URL path map, or if the Azure
+            API call fails.
+        """
+        gateway = self._get_gateway()
+        url_path_maps = gateway.url_path_maps or []
+
+        found = False
+        for upm in url_path_maps:
+            original = list(upm.path_rules or [])
+            filtered = [r for r in original if r.name != rule_name]
+            if len(filtered) < len(original):
+                found = True
+                upm.path_rules = filtered
+
+        if not found:
+            raise AzureGatewayError(
+                f"Path rule '{rule_name}' not found on Application Gateway "
+                f"'{self._gateway_name}'."
+            )
+
+        logger.info(
+            "Deleting path rule '%s' from gateway '%s'.",
+            rule_name,
+            self._gateway_name,
+        )
+
+        try:
+            poller = self._network_client.application_gateways.begin_create_or_update(
+                resource_group_name=self._resource_group,
+                application_gateway_name=self._gateway_name,
+                parameters=gateway,
+            )
+            poller.result(timeout=600)
+        except HttpResponseError as exc:
+            raise AzureGatewayError(
+                f"Failed to delete path rule '{rule_name}' on Application Gateway "
+                f"'{self._gateway_name}': {exc}"
+            ) from exc

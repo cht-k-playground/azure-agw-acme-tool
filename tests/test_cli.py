@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import logging as _stdlib_logging
+import uuid
 from collections.abc import Generator
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import yaml
 from click.testing import CliRunner
 
 from az_acme_tool.cli import main
@@ -38,6 +41,27 @@ def runner() -> CliRunner:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _write_config(tmp_path: Path) -> Path:
+    """Write a minimal valid config YAML to tmp_path and return its path."""
+    cfg = {
+        "acme": {"email": "test@example.com"},
+        "azure": {
+            "subscription_id": str(uuid.uuid4()),
+            "resource_group": "rg-test",
+            "auth_method": "default",
+        },
+        "gateways": [
+            {
+                "name": "agw-alpha",
+                "domains": [{"domain": "www.example.com", "cert_store": "agw_direct"}],
+            }
+        ],
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.dump(cfg))
+    return config_path
 
 
 def _invoke_main_with_mock_logging(runner: CliRunner, args: list[str]) -> object:
@@ -158,8 +182,47 @@ def test_status_subcommand_missing_config(runner: CliRunner) -> None:
     assert "Error" in (result.output + (result.stderr if hasattr(result, "stderr") else ""))
 
 
-def test_cleanup_subcommand_raises_not_implemented(runner: CliRunner) -> None:
-    """cleanup subcommand raises NotImplementedError (not yet implemented)."""
-    with patch("az_acme_tool.cli.setup_logging"):
-        with pytest.raises(NotImplementedError):
-            runner.invoke(main, ["cleanup"], catch_exceptions=False)
+def test_cleanup_subcommand_no_rules(runner: CliRunner, tmp_path: Path) -> None:
+    """cleanup subcommand prints 'no rules found' message when no orphaned rules exist."""
+    from unittest.mock import MagicMock
+
+    config_path = _write_config(tmp_path)
+    mock_client = MagicMock()
+    mock_client.list_acme_challenge_rules.return_value = []
+
+    with (
+        patch("az_acme_tool.cli.setup_logging"),
+        patch("az_acme_tool.cleanup_command.DefaultAzureCredential"),
+        patch(
+            "az_acme_tool.cleanup_command.AzureGatewayClient",
+            return_value=mock_client,
+        ),
+    ):
+        result = runner.invoke(main, ["--config", str(config_path), "cleanup"])
+
+    assert result.exit_code == 0
+    assert "No orphaned ACME challenge rules found." in result.output
+
+
+def test_cleanup_subcommand_all_flag(runner: CliRunner, tmp_path: Path) -> None:
+    """cleanup --all removes all orphaned rules without prompting."""
+    from unittest.mock import MagicMock
+
+    config_path = _write_config(tmp_path)
+    rule = "acme-challenge-www-example-com-1709030400"
+    mock_client = MagicMock()
+    mock_client.list_acme_challenge_rules.return_value = [rule]
+
+    with (
+        patch("az_acme_tool.cli.setup_logging"),
+        patch("az_acme_tool.cleanup_command.DefaultAzureCredential"),
+        patch(
+            "az_acme_tool.cleanup_command.AzureGatewayClient",
+            return_value=mock_client,
+        ),
+    ):
+        result = runner.invoke(main, ["--config", str(config_path), "cleanup", "--all"])
+
+    assert result.exit_code == 0
+    mock_client.delete_routing_rule.assert_called_once_with(rule)
+    assert f"Removed: {rule}" in result.output

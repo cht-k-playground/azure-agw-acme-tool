@@ -11,14 +11,13 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
+from azure.core.exceptions import HttpResponseError
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
-from azure.core.exceptions import HttpResponseError
 
 from az_acme_tool.azure_gateway import AzureGatewayClient, AzureGatewayError
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -55,7 +54,11 @@ def _make_ssl_cert_mock(
     """Build a mock ApplicationGatewaySslCertificate."""
     m = MagicMock()
     m.name = name
-    m.id = cert_id or f"/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/applicationGateways/gw/sslCertificates/{name}"
+    default_id = (
+        f"/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network"
+        f"/applicationGateways/gw/sslCertificates/{name}"
+    )
+    m.id = cert_id or default_id
     m.public_cert_data = public_cert_data
     return m
 
@@ -72,14 +75,30 @@ def _make_listener_mock(name: str, cert_id: str | None = None) -> MagicMock:
     return m
 
 
+def _make_path_rule_mock(name: str) -> MagicMock:
+    """Build a mock ApplicationGatewayPathRule."""
+    m = MagicMock()
+    m.name = name
+    return m
+
+
+def _make_url_path_map_mock(path_rules: list[MagicMock] | None = None) -> MagicMock:
+    """Build a mock ApplicationGatewayUrlPathMap."""
+    m = MagicMock()
+    m.path_rules = path_rules or []
+    return m
+
+
 def _make_gateway_mock(
     ssl_certs: list[MagicMock] | None = None,
     listeners: list[MagicMock] | None = None,
+    url_path_maps: list[MagicMock] | None = None,
 ) -> MagicMock:
     """Build a mock ApplicationGateway with configurable ssl_certificates and listeners."""
     m = MagicMock()
     m.ssl_certificates = ssl_certs or []
     m.http_listeners = listeners or []
+    m.url_path_maps = url_path_maps or []
     return m
 
 
@@ -362,3 +381,133 @@ class TestUpdateListenerCertificate:
 
         with pytest.raises(AzureGatewayError, match="has no ARM resource ID"):
             client.update_listener_certificate("https-listener", "cert")
+
+
+# ---------------------------------------------------------------------------
+# list_acme_challenge_rules tests
+# ---------------------------------------------------------------------------
+
+
+class TestListAcmeChallengeRules:
+    def test_returns_matching_rule_names(
+        self,
+        client: AzureGatewayClient,
+        mock_network_client: MagicMock,
+    ) -> None:
+        """Returns names of path rules prefixed with acme-challenge-."""
+        rule1 = _make_path_rule_mock("acme-challenge-www-example-com-1709030400")
+        rule2 = _make_path_rule_mock("acme-challenge-api-example-com-1709030401")
+        rule_other = _make_path_rule_mock("normal-rule")
+        upm = _make_url_path_map_mock(path_rules=[rule1, rule2, rule_other])
+        gateway = _make_gateway_mock(url_path_maps=[upm])
+        mock_network_client.application_gateways.get.return_value = gateway
+
+        result = client.list_acme_challenge_rules()
+
+        assert sorted(result) == sorted(
+            [
+                "acme-challenge-www-example-com-1709030400",
+                "acme-challenge-api-example-com-1709030401",
+            ]
+        )
+
+    def test_returns_empty_list_when_no_matching_rules(
+        self,
+        client: AzureGatewayClient,
+        mock_network_client: MagicMock,
+    ) -> None:
+        """Returns empty list when no acme-challenge- prefixed rules exist."""
+        rule = _make_path_rule_mock("normal-rule")
+        upm = _make_url_path_map_mock(path_rules=[rule])
+        gateway = _make_gateway_mock(url_path_maps=[upm])
+        mock_network_client.application_gateways.get.return_value = gateway
+
+        result = client.list_acme_challenge_rules()
+
+        assert result == []
+
+    def test_returns_empty_list_when_no_url_path_maps(
+        self,
+        client: AzureGatewayClient,
+        mock_network_client: MagicMock,
+    ) -> None:
+        """Returns empty list when gateway has no URL path maps."""
+        gateway = _make_gateway_mock(url_path_maps=[])
+        mock_network_client.application_gateways.get.return_value = gateway
+
+        result = client.list_acme_challenge_rules()
+
+        assert result == []
+
+    def test_raises_azure_gateway_error_on_api_failure(
+        self,
+        client: AzureGatewayClient,
+        mock_network_client: MagicMock,
+    ) -> None:
+        """Raises AzureGatewayError when the Azure API returns HttpResponseError."""
+        mock_network_client.application_gateways.get.side_effect = HttpResponseError(
+            message="Forbidden"
+        )
+
+        with pytest.raises(AzureGatewayError, match="Failed to fetch Application Gateway"):
+            client.list_acme_challenge_rules()
+
+
+# ---------------------------------------------------------------------------
+# delete_routing_rule tests
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteRoutingRule:
+    def test_deletes_existing_rule_successfully(
+        self,
+        client: AzureGatewayClient,
+        mock_network_client: MagicMock,
+    ) -> None:
+        """Removes the named path rule and calls begin_create_or_update."""
+        rule = _make_path_rule_mock("acme-challenge-www-example-com-1709030400")
+        upm = _make_url_path_map_mock(path_rules=[rule])
+        gateway = _make_gateway_mock(url_path_maps=[upm])
+        mock_network_client.application_gateways.get.return_value = gateway
+        poller_mock = MagicMock()
+        mock_network_client.application_gateways.begin_create_or_update.return_value = (
+            poller_mock
+        )
+
+        client.delete_routing_rule("acme-challenge-www-example-com-1709030400")
+
+        # Rule should have been removed from the URL path map
+        assert upm.path_rules == []
+        mock_network_client.application_gateways.begin_create_or_update.assert_called_once()
+        poller_mock.result.assert_called_once_with(timeout=600)
+
+    def test_raises_when_rule_not_found(
+        self,
+        client: AzureGatewayClient,
+        mock_network_client: MagicMock,
+    ) -> None:
+        """Raises AzureGatewayError when the named rule does not exist."""
+        rule = _make_path_rule_mock("other-rule")
+        upm = _make_url_path_map_mock(path_rules=[rule])
+        gateway = _make_gateway_mock(url_path_maps=[upm])
+        mock_network_client.application_gateways.get.return_value = gateway
+
+        with pytest.raises(AzureGatewayError, match="Path rule 'missing-rule' not found"):
+            client.delete_routing_rule("missing-rule")
+
+    def test_raises_on_api_error_during_delete(
+        self,
+        client: AzureGatewayClient,
+        mock_network_client: MagicMock,
+    ) -> None:
+        """Raises AzureGatewayError when begin_create_or_update raises HttpResponseError."""
+        rule = _make_path_rule_mock("acme-challenge-www-example-com-1709030400")
+        upm = _make_url_path_map_mock(path_rules=[rule])
+        gateway = _make_gateway_mock(url_path_maps=[upm])
+        mock_network_client.application_gateways.get.return_value = gateway
+        mock_network_client.application_gateways.begin_create_or_update.side_effect = (
+            HttpResponseError(message="Conflict")
+        )
+
+        with pytest.raises(AzureGatewayError, match="Failed to delete path rule"):
+            client.delete_routing_rule("acme-challenge-www-example-com-1709030400")
