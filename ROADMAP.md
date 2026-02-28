@@ -289,7 +289,7 @@
 
 ---
 
-- [ ] `azure-function-responder` — Azure Function HTTP-01 challenge 回應器
+- [x] `azure-function-responder` — Azure Function HTTP-01 challenge 回應器
 
   **Dependencies**：`config-schema`、`logging-setup`
 
