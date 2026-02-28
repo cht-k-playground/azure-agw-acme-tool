@@ -61,6 +61,7 @@ def run_cleanup(config_path: str, cleanup_all: bool) -> None:
         raise CleanupError(f"Failed to load configuration: {exc}") from exc
 
     credential = DefaultAzureCredential()
+    total_found = 0
     total_removed = 0
 
     for gateway_cfg in config.gateways:
@@ -80,6 +81,8 @@ def run_cleanup(config_path: str, cleanup_all: bool) -> None:
 
         if not rules:
             continue
+
+        total_found += len(rules)
 
         for i, rule_name in enumerate(rules, start=1):
             should_delete: bool
@@ -107,5 +110,5 @@ def run_cleanup(config_path: str, cleanup_all: bool) -> None:
                     gateway_cfg.name,
                 )
 
-    if total_removed == 0:
+    if total_found == 0:
         click.echo("No orphaned ACME challenge rules found.")

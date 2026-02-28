@@ -60,7 +60,7 @@ The `cleanup` command stub already exists in `src/az_acme_tool/cli.py` (line 133
 
 ## Risks / Trade-offs
 
-- [Risk] AGW `begin_create_or_update` is called once per deleted rule, which is slow for many orphaned rules → Mitigation: Batch all deletions into a single `begin_create_or_update` call after removing all target path rules from the in-memory gateway object.
+- [Risk] AGW `begin_create_or_update` is called once per deleted rule, which is slow for many orphaned rules → Accepted trade-off: each `delete_routing_rule()` call fetches the gateway fresh and issues one `begin_create_or_update`. This keeps the method self-contained and independently testable. In practice, orphaned rules are rare (typically 0–2 per run), so the extra round-trips are acceptable. A future optimisation could add a `delete_routing_rules_batch()` method.
 - [Risk] Concurrent modification — another process modifies the AGW between `_get_gateway()` and `begin_create_or_update` → Mitigation: ARM will reject with a conflict error; `AzureGatewayError` will surface the message to the user.
 - [Risk] `url_path_maps` or `path_rules` may be `None` → Mitigation: Use `or []` guards throughout.
 
