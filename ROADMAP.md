@@ -265,7 +265,7 @@
 
 ---
 
-- [ ] `cli-cleanup` — 實作 `cleanup` 命令
+- [x] `cli-cleanup` — 實作 `cleanup` 命令
 
   **Dependencies**：`azure-gateway-client`
 
