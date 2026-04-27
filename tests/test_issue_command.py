@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+import re
+import threading
+import time
 import uuid
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -186,8 +189,9 @@ class TestIssueSummary:
         self, runner: CliRunner, two_gateway_config: Path
     ) -> None:
         result = runner.invoke(main, ["--config", str(two_gateway_config), "issue", "--dry-run"])
-        assert "Summary" in result.output
-        assert "3 domain(s)" in result.output
+        assert "Total: 3" in result.output
+        assert "Succeeded: 3" in result.output
+        assert "Failed: 0" in result.output
 
     def test_summary_shows_failed_on_error(
         self, runner: CliRunner, two_gateway_config: Path
@@ -197,7 +201,7 @@ class TestIssueSummary:
             side_effect=RuntimeError("ACME error"),
         ):
             result = runner.invoke(main, ["--config", str(two_gateway_config), "issue"])
-        assert "failed" in result.output.lower()
+        assert "Failed: 3" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -408,3 +412,179 @@ class TestIssueSingleDomain:
         secret = captured_password["pw"]
         assert secret  # sanity: the password was actually generated
         assert secret not in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# issue-flow-batch — bounded parallel processing & summary
+# ---------------------------------------------------------------------------
+
+
+def _five_gateway_config(tmp_path: Path) -> Path:
+    """Config with one gateway holding five domains for batch tests."""
+    return _write_config(
+        tmp_path,
+        gateways=[
+            {
+                "name": "agw-batch",
+                "acme_function_name": "batch-acme-func",
+                "domains": [
+                    {"domain": f"{label}.example.com", "cert_store": "agw_direct"}
+                    for label in ("a", "b", "c", "d", "e")
+                ],
+            }
+        ],
+    )
+
+
+class TestIssueBatchParallelism:
+    def test_max_three_in_flight(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        """At most 3 domains are processed concurrently when batching 5 domains."""
+        config_path = _five_gateway_config(tmp_path)
+
+        in_flight = 0
+        peak = 0
+        lock = threading.Lock()
+
+        def _slow_issue(target: object, config: object) -> None:
+            nonlocal in_flight, peak
+            with lock:
+                in_flight += 1
+                if in_flight > peak:
+                    peak = in_flight
+            # Hold long enough for the executor to saturate before any future returns.
+            time.sleep(0.2)
+            with lock:
+                in_flight -= 1
+
+        with patch(
+            "az_acme_tool.issue_command._issue_single_domain", side_effect=_slow_issue
+        ):
+            result = runner.invoke(main, ["--config", str(config_path), "issue"])
+
+        assert result.exit_code == 0, result.output
+        assert peak <= 3, f"observed peak concurrency {peak} exceeds cap of 3"
+        assert peak >= 2, f"expected at least 2 concurrent domains, observed {peak}"
+
+
+class TestIssueBatchFailureIsolation:
+    def test_other_domains_continue_on_one_failure(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        """When one domain raises, the other four still get processed exactly once."""
+        config_path = _five_gateway_config(tmp_path)
+        called: list[str] = []
+        called_lock = threading.Lock()
+
+        def _selective_failure(target: object, config: object) -> None:
+            with called_lock:
+                called.append(target.domain)  # type: ignore[attr-defined]
+            if target.domain == "b.example.com":  # type: ignore[attr-defined]
+                raise RuntimeError("simulated failure for b")
+
+        with patch(
+            "az_acme_tool.issue_command._issue_single_domain",
+            side_effect=_selective_failure,
+        ):
+            result = runner.invoke(main, ["--config", str(config_path), "issue"])
+
+        assert sorted(called) == [
+            "a.example.com",
+            "b.example.com",
+            "c.example.com",
+            "d.example.com",
+            "e.example.com",
+        ]
+        assert "[FAILED] b.example.com" in result.output
+        # The CLI exits non-zero when any domain fails.
+        assert result.exit_code != 0
+
+
+class TestIssueBatchSummary:
+    @staticmethod
+    def _two_domain_config(tmp_path: Path) -> Path:
+        return _write_config(
+            tmp_path,
+            gateways=[
+                {
+                    "name": "agw-pair",
+                    "acme_function_name": "pair-acme-func",
+                    "domains": [
+                        {"domain": "ok.example.com", "cert_store": "agw_direct"},
+                        {"domain": "fail.example.com", "cert_store": "agw_direct"},
+                    ],
+                }
+            ],
+        )
+
+    def test_summary_line_format(self, runner: CliRunner, tmp_path: Path) -> None:
+        """Summary line matches `Total: N | Succeeded: S | Failed: F | Duration: X.Ys`."""
+        config_path = self._two_domain_config(tmp_path)
+
+        def _one_fails(target: object, config: object) -> None:
+            if target.domain == "fail.example.com":  # type: ignore[attr-defined]
+                raise RuntimeError("nope")
+
+        with patch(
+            "az_acme_tool.issue_command._issue_single_domain", side_effect=_one_fails
+        ):
+            result = runner.invoke(main, ["--config", str(config_path), "issue"])
+
+        pattern = re.compile(
+            r"^Total: (?P<total>\d+) \| Succeeded: (?P<succeeded>\d+) "
+            r"\| Failed: (?P<failed>\d+) \| Duration: \d+\.\d+s$",
+            re.MULTILINE,
+        )
+        match = pattern.search(result.output)
+        assert match is not None, (
+            f"summary line not found in output:\n{result.output}"
+        )
+        # Counts must add up — succeeded + failed == total (spec scenario "Counts add up").
+        total = int(match.group("total"))
+        succeeded = int(match.group("succeeded"))
+        failed = int(match.group("failed"))
+        assert succeeded + failed == total, (
+            f"counts do not add up: succeeded={succeeded} + failed={failed} != total={total}"
+        )
+
+    def test_failed_domains_block_lists_each_failure(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        """`Failed domains:` block names each failing domain with its error message."""
+        config_path = self._two_domain_config(tmp_path)
+
+        def _one_fails(target: object, config: object) -> None:
+            if target.domain == "fail.example.com":  # type: ignore[attr-defined]
+                raise RuntimeError("custom-error-text")
+
+        with patch(
+            "az_acme_tool.issue_command._issue_single_domain", side_effect=_one_fails
+        ):
+            result = runner.invoke(main, ["--config", str(config_path), "issue"])
+
+        assert "Failed domains:" in result.output
+        assert "fail.example.com on agw-pair: custom-error-text" in result.output
+
+    def test_dry_run_remains_serial(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        """Dry-run prints in `_resolve_targets` order and never invokes the pipeline."""
+        config_path = _five_gateway_config(tmp_path)
+
+        with patch(
+            "az_acme_tool.issue_command._issue_single_domain"
+        ) as mock_issue:
+            result = runner.invoke(
+                main, ["--config", str(config_path), "issue", "--dry-run"]
+            )
+
+        mock_issue.assert_not_called()
+        # Each [DRY-RUN] line should appear in the order produced by _resolve_targets.
+        positions = [
+            result.output.index(f"[DRY-RUN] Would issue certificate for {label}.example.com")
+            for label in ("a", "b", "c", "d", "e")
+        ]
+        assert positions == sorted(positions), (
+            f"dry-run lines out of order: {positions}\n{result.output}"
+        )

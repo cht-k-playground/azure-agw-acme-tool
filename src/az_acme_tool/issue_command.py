@@ -14,6 +14,7 @@ All failures are surfaced as :class:`IssueError`.
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import secrets
 import time
@@ -31,6 +32,10 @@ from az_acme_tool.cert_converter import generate_csr, pem_to_pfx
 from az_acme_tool.config import AppConfig, GatewayConfig, parse_config
 
 logger = logging.getLogger(__name__)
+
+# Maximum number of domains processed concurrently in the batch issue flow.
+# Fixed by ROADMAP `issue-flow-batch` AC1 — see openspec spec `cli-issue`.
+_MAX_BATCH_WORKERS = 3
 
 # ---------------------------------------------------------------------------
 # Exception
@@ -335,28 +340,58 @@ def run_issue(
         click.echo("No domains matched the specified filters. Nothing to do.")
         return
 
-    succeeded = 0
-    failed = 0
-
-    for target in targets:
-        if dry_run:
+    if dry_run:
+        # Dry-run remains serial: no I/O, output ordering preserved for tests.
+        for target in targets:
             click.echo(
                 f"[DRY-RUN] Would issue certificate for {target.domain} on {target.gateway_name}"
             )
-            succeeded += 1
-            continue
+        total = len(targets)
+        click.echo(
+            f"\nTotal: {total} | Succeeded: {total} | Failed: 0 | Duration: 0.0s"
+        )
+        return
 
-        logger.info("Issuing certificate for %s on %s", target.domain, target.gateway_name)
-        try:
-            _issue_single_domain(target, config)
-            click.echo(f"[OK] {target.domain} on {target.gateway_name}")
-            succeeded += 1
-        except Exception as exc:
-            click.echo(f"[FAILED] {target.domain} on {target.gateway_name}: {exc}", err=True)
-            logger.error("Failed to issue certificate for %s: %s", target.domain, exc)
-            failed += 1
+    succeeded = 0
+    failed = 0
+    failures: list[tuple[DomainTarget, Exception]] = []
+
+    start = time.monotonic()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=_MAX_BATCH_WORKERS) as executor:
+        future_to_target: dict[concurrent.futures.Future[None], DomainTarget] = {
+            executor.submit(_issue_single_domain, target, config): target
+            for target in targets
+        }
+        for future in concurrent.futures.as_completed(future_to_target):
+            target = future_to_target[future]
+            try:
+                future.result()
+            except Exception as exc:
+                click.echo(
+                    f"[FAILED] {target.domain} on {target.gateway_name}: {exc}",
+                    err=True,
+                )
+                logger.error("Failed to issue certificate for %s: %s", target.domain, exc)
+                failures.append((target, exc))
+                failed += 1
+            else:
+                click.echo(f"[OK] {target.domain} on {target.gateway_name}")
+                succeeded += 1
+    duration = time.monotonic() - start
 
     total = succeeded + failed
-    click.echo(f"\nSummary: {total} domain(s) — {succeeded} succeeded, {failed} failed.")
+    click.echo(
+        f"\nTotal: {total} | Succeeded: {succeeded} | Failed: {failed} "
+        f"| Duration: {duration:.1f}s"
+    )
+
     if failed > 0:
+        # Re-list failures in submission order (sorted by `targets`) so operators
+        # see a stable summary regardless of completion order.
+        failure_lookup: dict[int, Exception] = {id(t): err for t, err in failures}
+        click.echo("\nFailed domains:")
+        for target in targets:
+            err = failure_lookup.get(id(target))
+            if err is not None:
+                click.echo(f"  - {target.domain} on {target.gateway_name}: {err}")
         raise IssueError(f"{failed} domain(s) failed to issue certificates.")
