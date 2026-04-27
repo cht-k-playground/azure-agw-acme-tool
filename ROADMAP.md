@@ -351,7 +351,7 @@
 
 ---
 
-- [ ] `issue-flow-batch` — 多 domain 並行處理、失敗隔離與批次摘要報告
+- [x] `issue-flow-batch` — 多 domain 並行處理、失敗隔離與批次摘要報告
 
   **Dependencies**：`issue-flow-core`
 
