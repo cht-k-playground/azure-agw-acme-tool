@@ -12,7 +12,6 @@ import sys
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -32,7 +31,13 @@ def _load_function_app(mock_af: Any) -> Any:
         if "function_app" in key:
             del sys.modules[key]
 
-    with patch.dict(sys.modules, {"azure.functions": mock_af, "azure": MagicMock()}):
+    # `import azure.functions as func` binds func to the .functions attribute of
+    # the azure module, not to sys.modules['azure.functions']. So we have to put
+    # mock_af there explicitly — otherwise MagicMock auto-creates a fresh child.
+    mock_azure = MagicMock()
+    mock_azure.functions = mock_af
+
+    with patch.dict(sys.modules, {"azure.functions": mock_af, "azure": mock_azure}):
         spec = importlib.util.spec_from_file_location("function_app", _FUNCTION_APP_PATH)
         assert spec is not None
         module = importlib.util.module_from_spec(spec)
@@ -42,10 +47,25 @@ def _load_function_app(mock_af: Any) -> Any:
 
 
 def _make_mock_af(response_cls: type[Any]) -> MagicMock:
-    """Build a minimal azure.functions mock with a custom HttpResponse class."""
+    """Build a minimal azure.functions mock with a custom HttpResponse class.
+
+    The mocked ``FunctionApp().route(...)`` is a passthrough decorator so the
+    real ``acme_challenge_responder`` survives module load (a plain MagicMock
+    decorator would replace the function with a MagicMock).
+    """
     mock_af = MagicMock()
     mock_af.AuthLevel.ANONYMOUS = "ANONYMOUS"
-    mock_af.FunctionApp.return_value = MagicMock()
+
+    fake_app = MagicMock()
+
+    def _passthrough_route(*_args: Any, **_kwargs: Any) -> Any:
+        def _decorator(fn: Any) -> Any:
+            return fn
+
+        return _decorator
+
+    fake_app.route = _passthrough_route
+    mock_af.FunctionApp.return_value = fake_app
     mock_af.HttpRequest = MagicMock
     mock_af.HttpResponse = response_cls
     return mock_af
@@ -64,7 +84,7 @@ def _make_mock_request(token: str = "test-token") -> MagicMock:
 
 class TestAcmeChallengeResponder:
     def test_returns_200_with_correct_body_and_mimetype(self) -> None:
-        """HTTP 200 with key authorization body and text/plain when ACME_CHALLENGE_RESPONSE is set."""
+        """HTTP 200 + text/plain body when ACME_CHALLENGE_RESPONSE is set."""
         key_auth = "TOKEN.KEY_AUTH_VALUE"
         req = _make_mock_request(token="TOKEN")
         captured: dict[str, Any] = {}

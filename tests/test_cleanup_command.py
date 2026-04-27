@@ -25,7 +25,11 @@ from az_acme_tool.cli import main
 
 def _write_config(tmp_path: Path) -> Path:
     cfg = {
-        "acme": {"email": "test@example.com"},
+        "acme": {
+            "email": "test@example.com",
+            "directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory",
+            "account_key_path": "/tmp/account.key",
+        },
         "azure": {
             "subscription_id": str(uuid.uuid4()),
             "resource_group": "rg-test",
@@ -34,6 +38,7 @@ def _write_config(tmp_path: Path) -> Path:
         "gateways": [
             {
                 "name": "agw-alpha",
+                "acme_function_name": "alpha-acme-func",
                 "domains": [{"domain": "www.example.com", "cert_store": "agw_direct"}],
             }
         ],

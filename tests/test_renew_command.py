@@ -22,7 +22,11 @@ from az_acme_tool.renew_command import _days_remaining, _domain_to_cert_name
 def _write_config(tmp_path: Path, gateways: list[dict]) -> Path:  # type: ignore[type-arg]
     """Write a minimal valid config YAML and return its path."""
     cfg = {
-        "acme": {"email": "test@example.com"},
+        "acme": {
+            "email": "test@example.com",
+            "directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory",
+            "account_key_path": "/tmp/account.key",
+        },
         "azure": {
             "subscription_id": str(uuid.uuid4()),
             "resource_group": "rg-test",
@@ -63,6 +67,7 @@ def single_domain_config(tmp_path: Path) -> Path:
         gateways=[
             {
                 "name": "agw-test",
+                "acme_function_name": "test-acme-func",
                 "domains": [{"domain": "www.example.com", "cert_store": "agw_direct"}],
             }
         ],
@@ -76,6 +81,7 @@ def two_gateway_config(tmp_path: Path) -> Path:
         gateways=[
             {
                 "name": "agw-alpha",
+                "acme_function_name": "alpha-acme-func",
                 "domains": [
                     {"domain": "www.alpha.com", "cert_store": "agw_direct"},
                     {"domain": "api.alpha.com", "cert_store": "agw_direct"},
@@ -83,6 +89,7 @@ def two_gateway_config(tmp_path: Path) -> Path:
             },
             {
                 "name": "agw-beta",
+                "acme_function_name": "beta-acme-func",
                 "domains": [
                     {"domain": "www.beta.com", "cert_store": "agw_direct"},
                 ],

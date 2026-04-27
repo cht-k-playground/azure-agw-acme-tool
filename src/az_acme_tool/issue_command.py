@@ -5,11 +5,9 @@ Provides :func:`run_issue` which is called by the thin Click command wiring in
 
 * Config loading and gateway/domain filtering
 * Dry-run mode (print planned steps, no Azure/ACME calls)
-* Per-domain orchestration (delegates to :func:`_issue_single_domain`)
+* Per-domain orchestration via the 14-step ACME HTTP-01 pipeline in
+  :func:`_issue_single_domain`
 * Summary output (total / succeeded / failed)
-
-The actual 14-step ACME pipeline is stubbed in :func:`_issue_single_domain`;
-it is replaced by the ``issue-flow-core`` change.
 
 All failures are surfaced as :class:`IssueError`.
 """
@@ -17,12 +15,20 @@ All failures are surfaced as :class:`IssueError`.
 from __future__ import annotations
 
 import logging
+import secrets
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import click
+from azure.identity import DefaultAzureCredential
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 
-from az_acme_tool.config import AppConfig, parse_config
+from az_acme_tool.acme_client import AcmeClient
+from az_acme_tool.azure_gateway import AzureGatewayClient
+from az_acme_tool.cert_converter import generate_csr, pem_to_pfx
+from az_acme_tool.config import AppConfig, GatewayConfig, parse_config
 
 logger = logging.getLogger(__name__)
 
@@ -101,32 +107,187 @@ def _resolve_targets(
     return targets
 
 
+def _domain_to_cert_name(domain: str) -> str:
+    """Return the AGW SSL certificate name for *domain* (``foo.bar`` → ``foo-bar-cert``)."""
+    return domain.replace(".", "-") + "-cert"
+
+
+def _domain_sanitized(domain: str) -> str:
+    """Return *domain* with dots replaced by hyphens (for resource naming)."""
+    return domain.replace(".", "-")
+
+
+def _generate_domain_key_pem() -> str:
+    """Generate a fresh RSA-2048 private key in PEM form (in-memory only)."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem = key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    return pem.decode("ascii")
+
+
+def _build_acme_client(config: AppConfig) -> AcmeClient:
+    """Construct an :class:`AcmeClient` from the parsed configuration."""
+    return AcmeClient(directory_url=config.acme.directory_url)
+
+
+def _build_gateway_client(
+    config: AppConfig, gateway_cfg: GatewayConfig
+) -> AzureGatewayClient:
+    """Construct an :class:`AzureGatewayClient` for the given gateway."""
+    return AzureGatewayClient(
+        subscription_id=str(config.azure.subscription_id),
+        resource_group=config.azure.resource_group,
+        gateway_name=gateway_cfg.name,
+        credential=DefaultAzureCredential(),
+    )
+
+
 def _issue_single_domain(
     target: DomainTarget,
-    config: AppConfig,  # noqa: ARG001
+    config: AppConfig,
 ) -> None:
-    """Issue a certificate for a single domain on a gateway.
+    """Issue an ACME HTTP-01 certificate for one domain on one gateway.
 
-    .. note::
-        This function is a placeholder stub.  The ``issue-flow-core`` change
-        replaces it with the real 14-step ACME pipeline.
+    Implements the 14-step pipeline:
+
+    1. Resolve config + gateway entry
+    2. Register/resume ACME account
+    3. Create new ACME order
+    4. Extract HTTP-01 challenge (token + key_authorization)
+    5. Write key_authorization to the Azure Function App Settings
+    6. Add the temporary path-based routing rule on the AGW
+    7. Notify the ACME CA (answer_challenge)
+    8. Poll until the authorization is valid
+    9. Finalize the order with the production CSR
+    10. Download the issued certificate (PEM)
+    11. Convert PEM → PFX with a random in-memory password
+    12. Upload the PFX to the AGW as a named SSL certificate
+    13. Update every listener that referenced the old certificate
+    14. Delete the temporary routing rule (always — guaranteed by ``finally``)
 
     Parameters
     ----------
     target:
         The domain/gateway pair to issue a certificate for.
     config:
-        The full application configuration (passed for future use).
-
-    Raises
-    ------
-    NotImplementedError
-        Always — replaced by ``issue-flow-core``.
+        The full application configuration.
     """
-    raise NotImplementedError(
-        f"Certificate issuance for {target.domain} on {target.gateway_name} "
-        "is not yet implemented — awaiting issue-flow-core."
+    domain = target.domain
+    gateway_cfg = next(
+        (gw for gw in config.gateways if gw.name == target.gateway_name),
+        None,
     )
+    if gateway_cfg is None:
+        # Defensive: _resolve_targets only returns targets that exist in config.
+        raise IssueError(
+            f"Gateway '{target.gateway_name}' not found in configuration."
+        )
+
+    cert_name = _domain_to_cert_name(domain)
+    rule_name = f"acme-challenge-{_domain_sanitized(domain)}-{int(time.time())}"
+    backend_fqdn = f"{gateway_cfg.acme_function_name}.azurewebsites.net"
+
+    acme = _build_acme_client(config)
+    agw = _build_gateway_client(config, gateway_cfg)
+
+    # Step 2: register/resume ACME account.
+    acme.register_account(
+        email=str(config.acme.email),
+        account_key_path=config.acme.account_key_path,
+    )
+
+    # Step 3: create order.
+    order = acme.new_order([domain])
+
+    # Step 4: extract HTTP-01 challenge (token, key_authorization).
+    _token, key_auth = acme.get_http01_challenge(order, domain)
+
+    # Locate the actual ChallengeBody we'll answer in step 7.
+    challb = None
+    for authzr in order.authorizations:
+        if authzr.body.identifier.value == domain:
+            for cb in authzr.body.challenges:
+                # Match by class name to avoid an extra import; HTTP01 is the
+                # only challenge type extracted by get_http01_challenge.
+                if type(cb.chall).__name__ == "HTTP01":
+                    challb = cb
+                    break
+        if challb is not None:
+            break
+    if challb is None:
+        raise IssueError(
+            f"No HTTP-01 challenge body found for domain '{domain}' in order."
+        )
+
+    rule_added = False
+    try:
+        # Step 5: write key_authorization to the Azure Function App Settings.
+        agw.update_function_app_settings(
+            function_app_name=gateway_cfg.acme_function_name,
+            settings={"ACME_CHALLENGE_RESPONSE": key_auth},
+        )
+
+        # Step 6: add the temporary path-based routing rule.
+        agw.add_routing_rule(
+            rule_name=rule_name,
+            domain=domain,
+            backend_fqdn=backend_fqdn,
+        )
+        rule_added = True
+
+        # Step 7: notify the ACME CA.
+        acme.answer_challenge(challb)
+
+        # Step 8: poll until valid.
+        acme.poll_until_valid(order)
+
+        # Step 9: finalize with the production CSR (with a domain-specific key).
+        domain_key_pem = _generate_domain_key_pem()
+        csr_der = generate_csr([domain], domain_key_pem)
+
+        finalized = acme.finalize_order(order, csr_der)
+
+        # Step 10: download cert PEM.
+        cert_pem = acme.download_certificate(finalized)
+
+        # Step 11: PEM → PFX with a random in-memory password.
+        pfx_password = secrets.token_urlsafe(32)
+        pfx_data = pem_to_pfx(cert_pem, domain_key_pem, pfx_password)
+
+        # Step 12: upload PFX as a named SSL certificate.
+        agw.upload_ssl_certificate(
+            cert_name=cert_name,
+            pfx_data=pfx_data,
+            password=pfx_password,
+        )
+
+        # Steps 12-13: update every listener that referenced the cert.
+        listeners = agw.get_listeners_by_cert_name(cert_name)
+        if not listeners:
+            logger.warning(
+                "No listeners reference certificate '%s' on gateway '%s' — "
+                "skipping listener update (first issuance).",
+                cert_name,
+                target.gateway_name,
+            )
+        for listener_name in listeners:
+            agw.update_listener_certificate(listener_name, cert_name)
+    finally:
+        # Step 14: always delete the temporary routing rule if we created it.
+        if rule_added:
+            try:
+                agw.delete_routing_rule(rule_name)
+            except Exception as cleanup_exc:
+                # Don't mask the original failure; log and continue.
+                logger.error(
+                    "Failed to delete temporary routing rule '%s' on gateway '%s': %s",
+                    rule_name,
+                    target.gateway_name,
+                    cleanup_exc,
+                )
 
 
 # ---------------------------------------------------------------------------

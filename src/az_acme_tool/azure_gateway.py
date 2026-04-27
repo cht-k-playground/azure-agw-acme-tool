@@ -5,7 +5,10 @@ following operations:
 
 - ``list_certificates()``              — enumerate SSL certificates on a gateway
 - ``get_certificate_expiry()``         — read the expiry datetime of a named cert
+- ``upload_ssl_certificate()``         — upload a PFX-encoded SSL certificate
 - ``update_listener_certificate()``    — point a gateway listener at a cert
+- ``get_listeners_by_cert_name()``     — find listeners using a named cert
+- ``add_routing_rule()``               — create a temporary ACME challenge path rule
 - ``list_acme_challenge_rules()``      — list orphaned ACME challenge path rules
 - ``delete_routing_rule()``            — remove a named path rule
 - ``update_function_app_settings()``   — write App Settings to an Azure Function
@@ -23,7 +26,16 @@ from typing import Any
 from azure.core.credentials import TokenCredential
 from azure.core.exceptions import HttpResponseError
 from azure.mgmt.network import NetworkManagementClient
-from azure.mgmt.network.models import ApplicationGateway, SubResource
+from azure.mgmt.network.models import (
+    ApplicationGateway,
+    ApplicationGatewayBackendAddress,
+    ApplicationGatewayBackendAddressPool,
+    ApplicationGatewayBackendHttpSettings,
+    ApplicationGatewayPathRule,
+    ApplicationGatewaySslCertificate,
+    ApplicationGatewayUrlPathMap,
+    SubResource,
+)
 from azure.mgmt.web import WebSiteManagementClient
 from azure.mgmt.web.models import StringDictionary
 from cryptography import x509
@@ -356,6 +368,202 @@ class AzureGatewayClient:
                 f"Failed to delete path rule '{rule_name}' on Application Gateway "
                 f"'{self._gateway_name}': {exc}"
             ) from exc
+
+    def upload_ssl_certificate(
+        self, cert_name: str, pfx_data: bytes, password: str
+    ) -> None:
+        """Upload (or replace) a PFX-encoded SSL certificate on the gateway.
+
+        Base64-encodes *pfx_data* and submits it through
+        ``application_gateways.begin_create_or_update``. If a certificate with
+        the same name already exists, it is replaced; otherwise a new entry is
+        appended.
+
+        Parameters
+        ----------
+        cert_name:
+            Name of the SSL certificate as it should be stored on the gateway.
+        pfx_data:
+            Raw PKCS#12 (PFX) bytes.
+        password:
+            PFX passphrase. Never logged at any level.
+
+        Raises
+        ------
+        AzureGatewayError
+            If the Azure API call fails.
+        """
+        gateway = self._get_gateway()
+
+        encoded_pfx = base64.b64encode(pfx_data).decode("ascii")
+        new_cert = ApplicationGatewaySslCertificate(
+            name=cert_name,
+            data=encoded_pfx,
+            password=password,
+        )
+
+        existing = gateway.ssl_certificates or []
+        kept = [c for c in existing if c.name != cert_name]
+        kept.append(new_cert)
+        gateway.ssl_certificates = kept
+
+        logger.info(
+            "Uploading SSL certificate '%s' to gateway '%s' (%d bytes PFX).",
+            cert_name,
+            self._gateway_name,
+            len(pfx_data),
+        )
+
+        try:
+            poller = self._network_client.application_gateways.begin_create_or_update(
+                resource_group_name=self._resource_group,
+                application_gateway_name=self._gateway_name,
+                parameters=gateway,
+            )
+            poller.result(timeout=600)
+        except HttpResponseError as exc:
+            raise AzureGatewayError(
+                f"Failed to upload SSL certificate '{cert_name}' to Application Gateway "
+                f"'{self._gateway_name}': {exc}"
+            ) from exc
+
+    def get_listeners_by_cert_name(self, cert_name: str) -> list[str]:
+        """Return names of HTTP listeners referencing the named SSL certificate.
+
+        Scans every HTTP listener on the gateway and collects those whose
+        ``ssl_certificate`` ARM ID ends with ``/{cert_name}``.
+
+        Parameters
+        ----------
+        cert_name:
+            Name of the SSL certificate.
+
+        Returns
+        -------
+        list[str]
+            Listener names that reference the certificate. Empty list if
+            no listeners match (e.g. on first issuance).
+
+        Raises
+        ------
+        AzureGatewayError
+            If the Azure API call fails.
+        """
+        gateway = self._get_gateway()
+        listeners = gateway.http_listeners or []
+        suffix = f"/{cert_name}"
+        matching: list[str] = []
+        for listener in listeners:
+            ssl_ref = listener.ssl_certificate
+            if ssl_ref is None or ssl_ref.id is None:
+                continue
+            if ssl_ref.id.endswith(suffix) and listener.name:
+                matching.append(listener.name)
+        return matching
+
+    def add_routing_rule(
+        self, rule_name: str, domain: str, backend_fqdn: str
+    ) -> None:
+        """Create a temporary path-based routing rule for ACME HTTP-01 challenges.
+
+        Adds:
+
+        * a backend address pool (named *rule_name*) targeting *backend_fqdn*,
+        * backend HTTP settings (named *rule_name*) — HTTPS, port 443,
+          ``pickHostNameFromBackendAddress=True``,
+        * a URL path map (named *rule_name*) containing one path rule
+          (named *rule_name*) for ``/.well-known/acme-challenge/*``
+          pointing at the new backend pool / HTTP settings.
+
+        The wiring of an existing listener to the new URL path map is the
+        operator's responsibility (or a separate provisioning step).
+
+        Parameters
+        ----------
+        rule_name:
+            Name shared by the path rule, URL path map, backend pool, and
+            HTTP settings. Should follow ``acme-challenge-{domain}-{ts}``.
+        domain:
+            FQDN being validated. Currently informational; reserved for
+            future use (e.g. host-based filtering).
+        backend_fqdn:
+            FQDN of the Azure Function responder
+            (e.g. ``my-acme-func.azurewebsites.net``).
+
+        Raises
+        ------
+        AzureGatewayError
+            If the Azure API call fails.
+        """
+        del domain  # currently informational; spec requires the parameter
+        gateway = self._get_gateway()
+        gateway_id = self._gateway_arm_id()
+
+        backend_pool = ApplicationGatewayBackendAddressPool(
+            name=rule_name,
+            backend_addresses=[ApplicationGatewayBackendAddress(fqdn=backend_fqdn)],
+        )
+        http_settings = ApplicationGatewayBackendHttpSettings(
+            name=rule_name,
+            protocol="Https",
+            port=443,
+            pick_host_name_from_backend_address=True,
+            request_timeout=30,
+        )
+        path_rule = ApplicationGatewayPathRule(
+            name=rule_name,
+            paths=["/.well-known/acme-challenge/*"],
+            backend_address_pool=SubResource(
+                id=f"{gateway_id}/backendAddressPools/{rule_name}",
+            ),
+            backend_http_settings=SubResource(
+                id=f"{gateway_id}/backendHttpSettingsCollection/{rule_name}",
+            ),
+        )
+        url_path_map = ApplicationGatewayUrlPathMap(
+            name=rule_name,
+            default_backend_address_pool=SubResource(
+                id=f"{gateway_id}/backendAddressPools/{rule_name}",
+            ),
+            default_backend_http_settings=SubResource(
+                id=f"{gateway_id}/backendHttpSettingsCollection/{rule_name}",
+            ),
+            path_rules=[path_rule],
+        )
+
+        gateway.backend_address_pools = list(gateway.backend_address_pools or []) + [backend_pool]
+        gateway.backend_http_settings_collection = list(
+            gateway.backend_http_settings_collection or []
+        ) + [http_settings]
+        gateway.url_path_maps = list(gateway.url_path_maps or []) + [url_path_map]
+
+        logger.info(
+            "Adding ACME challenge routing rule '%s' on gateway '%s' (backend=%s).",
+            rule_name,
+            self._gateway_name,
+            backend_fqdn,
+        )
+
+        try:
+            poller = self._network_client.application_gateways.begin_create_or_update(
+                resource_group_name=self._resource_group,
+                application_gateway_name=self._gateway_name,
+                parameters=gateway,
+            )
+            poller.result(timeout=600)
+        except HttpResponseError as exc:
+            raise AzureGatewayError(
+                f"Failed to add routing rule '{rule_name}' on Application Gateway "
+                f"'{self._gateway_name}': {exc}"
+            ) from exc
+
+    def _gateway_arm_id(self) -> str:
+        """Return the ARM resource ID prefix for sub-resources of this gateway."""
+        return (
+            f"/subscriptions/{self._subscription_id}"
+            f"/resourceGroups/{self._resource_group}"
+            f"/providers/Microsoft.Network/applicationGateways/{self._gateway_name}"
+        )
 
     def update_function_app_settings(
         self, function_app_name: str, settings: dict[str, str]

@@ -553,6 +553,220 @@ def client_with_web(
         )
 
 
+class TestUploadSslCertificate:
+    def test_uploads_certificate_successfully(
+        self,
+        client: AzureGatewayClient,
+        mock_network_client: MagicMock,
+    ) -> None:
+        """Adds the new cert to gateway.ssl_certificates and calls begin_create_or_update."""
+        gateway = _make_gateway_mock(ssl_certs=[])
+        mock_network_client.application_gateways.get.return_value = gateway
+        poller_mock = MagicMock()
+        mock_network_client.application_gateways.begin_create_or_update.return_value = (
+            poller_mock
+        )
+
+        pfx_bytes = b"\x00\x01\x02\x03 fake pfx data"
+        client.upload_ssl_certificate(
+            cert_name="www-example-com-cert",
+            pfx_data=pfx_bytes,
+            password="hunter2",
+        )
+
+        assert len(gateway.ssl_certificates) == 1
+        new_cert = gateway.ssl_certificates[0]
+        assert new_cert.name == "www-example-com-cert"
+        assert new_cert.data == base64.b64encode(pfx_bytes).decode("ascii")
+        assert new_cert.password == "hunter2"
+        mock_network_client.application_gateways.begin_create_or_update.assert_called_once()
+        poller_mock.result.assert_called_once_with(timeout=600)
+
+    def test_replaces_existing_certificate_with_same_name(
+        self,
+        client: AzureGatewayClient,
+        mock_network_client: MagicMock,
+    ) -> None:
+        """An existing cert with the same name is replaced rather than duplicated."""
+        existing = _make_ssl_cert_mock("www-example-com-cert")
+        other = _make_ssl_cert_mock("other-cert")
+        gateway = _make_gateway_mock(ssl_certs=[existing, other])
+        mock_network_client.application_gateways.get.return_value = gateway
+        poller_mock = MagicMock()
+        mock_network_client.application_gateways.begin_create_or_update.return_value = (
+            poller_mock
+        )
+
+        client.upload_ssl_certificate(
+            cert_name="www-example-com-cert",
+            pfx_data=b"new",
+            password="pw",
+        )
+
+        names = [c.name for c in gateway.ssl_certificates]
+        assert names.count("www-example-com-cert") == 1
+        assert "other-cert" in names
+
+    def test_password_not_logged(
+        self,
+        client: AzureGatewayClient,
+        mock_network_client: MagicMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The PFX password must not appear in any log message."""
+        gateway = _make_gateway_mock(ssl_certs=[])
+        mock_network_client.application_gateways.get.return_value = gateway
+        mock_network_client.application_gateways.begin_create_or_update.return_value = (
+            MagicMock()
+        )
+
+        secret_password = "SUPER_SECRET_PFX_PASSWORD_xyz"
+        with caplog.at_level(logging.DEBUG, logger="az_acme_tool.azure_gateway"):
+            client.upload_ssl_certificate(
+                cert_name="cert",
+                pfx_data=b"pfx-bytes",
+                password=secret_password,
+            )
+
+        assert secret_password not in caplog.text
+
+    def test_raises_on_api_error(
+        self,
+        client: AzureGatewayClient,
+        mock_network_client: MagicMock,
+    ) -> None:
+        """begin_create_or_update raising HttpResponseError surfaces AzureGatewayError."""
+        gateway = _make_gateway_mock(ssl_certs=[])
+        mock_network_client.application_gateways.get.return_value = gateway
+        mock_network_client.application_gateways.begin_create_or_update.side_effect = (
+            HttpResponseError(message="Conflict")
+        )
+
+        with pytest.raises(AzureGatewayError, match="Failed to upload SSL certificate"):
+            client.upload_ssl_certificate(
+                cert_name="cert",
+                pfx_data=b"pfx",
+                password="pw",
+            )
+
+
+class TestAddRoutingRule:
+    def test_creates_path_rule_with_correct_pattern(
+        self,
+        client: AzureGatewayClient,
+        mock_network_client: MagicMock,
+    ) -> None:
+        """A new URL path map / backend pool / HTTP settings is appended with the ACME path."""
+        gateway = _make_gateway_mock(url_path_maps=[])
+        gateway.backend_address_pools = []
+        gateway.backend_http_settings_collection = []
+        mock_network_client.application_gateways.get.return_value = gateway
+        poller_mock = MagicMock()
+        mock_network_client.application_gateways.begin_create_or_update.return_value = (
+            poller_mock
+        )
+
+        client.add_routing_rule(
+            rule_name="acme-challenge-www-example-com-1709030400",
+            domain="www.example.com",
+            backend_fqdn="my-acme-func.azurewebsites.net",
+        )
+
+        # New URL path map appended with the ACME challenge path rule.
+        assert len(gateway.url_path_maps) == 1
+        upm = gateway.url_path_maps[0]
+        assert upm.name == "acme-challenge-www-example-com-1709030400"
+        assert len(upm.path_rules) == 1
+        path_rule = upm.path_rules[0]
+        assert path_rule.name == "acme-challenge-www-example-com-1709030400"
+        assert path_rule.paths == ["/.well-known/acme-challenge/*"]
+
+        # Backend pool & HTTP settings appended with the function FQDN / HTTPS:443.
+        assert len(gateway.backend_address_pools) == 1
+        pool = gateway.backend_address_pools[0]
+        assert pool.backend_addresses[0].fqdn == "my-acme-func.azurewebsites.net"
+        assert len(gateway.backend_http_settings_collection) == 1
+        settings = gateway.backend_http_settings_collection[0]
+        assert settings.protocol == "Https"
+        assert settings.port == 443
+        assert settings.pick_host_name_from_backend_address is True
+
+        mock_network_client.application_gateways.begin_create_or_update.assert_called_once()
+        poller_mock.result.assert_called_once_with(timeout=600)
+
+    def test_raises_on_api_error(
+        self,
+        client: AzureGatewayClient,
+        mock_network_client: MagicMock,
+    ) -> None:
+        """HttpResponseError from begin_create_or_update is surfaced as AzureGatewayError."""
+        gateway = _make_gateway_mock(url_path_maps=[])
+        gateway.backend_address_pools = []
+        gateway.backend_http_settings_collection = []
+        mock_network_client.application_gateways.get.return_value = gateway
+        mock_network_client.application_gateways.begin_create_or_update.side_effect = (
+            HttpResponseError(message="Forbidden")
+        )
+
+        with pytest.raises(AzureGatewayError, match="Failed to add routing rule"):
+            client.add_routing_rule(
+                rule_name="acme-challenge-www-example-com-1709030400",
+                domain="www.example.com",
+                backend_fqdn="fn.azurewebsites.net",
+            )
+
+
+class TestGetListenersByCertName:
+    def test_returns_listener_names_when_referenced(
+        self,
+        client: AzureGatewayClient,
+        mock_network_client: MagicMock,
+    ) -> None:
+        """Returns names of listeners whose ssl_certificate ARM ID ends with /{cert_name}."""
+        cert_id = (
+            "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network"
+            "/applicationGateways/gw/sslCertificates/www-example-com-cert"
+        )
+        listener1 = _make_listener_mock("https-443-www", cert_id=cert_id)
+        listener2 = _make_listener_mock("https-443-api", cert_id=cert_id)
+        listener3 = _make_listener_mock("https-443-other", cert_id=cert_id.replace(
+            "www-example-com-cert", "other-cert"
+        ))
+        gateway = _make_gateway_mock(listeners=[listener1, listener2, listener3])
+        mock_network_client.application_gateways.get.return_value = gateway
+
+        result = client.get_listeners_by_cert_name("www-example-com-cert")
+
+        assert sorted(result) == ["https-443-api", "https-443-www"]
+
+    def test_returns_empty_list_when_no_match(
+        self,
+        client: AzureGatewayClient,
+        mock_network_client: MagicMock,
+    ) -> None:
+        """Returns empty list when no listener references the named certificate."""
+        listener = _make_listener_mock("https-443", cert_id=None)
+        gateway = _make_gateway_mock(listeners=[listener])
+        mock_network_client.application_gateways.get.return_value = gateway
+
+        result = client.get_listeners_by_cert_name("missing-cert")
+
+        assert result == []
+
+    def test_raises_on_api_error(
+        self,
+        client: AzureGatewayClient,
+        mock_network_client: MagicMock,
+    ) -> None:
+        """HttpResponseError from get propagates as AzureGatewayError."""
+        mock_network_client.application_gateways.get.side_effect = HttpResponseError(
+            message="Forbidden"
+        )
+
+        with pytest.raises(AzureGatewayError, match="Failed to fetch Application Gateway"):
+            client.get_listeners_by_cert_name("any-cert")
+
+
 class TestUpdateFunctionAppSettings:
     def test_calls_update_application_settings_with_correct_args(
         self,

@@ -63,6 +63,8 @@ class AcmeConfig(BaseModel):
     """ACME provider configuration."""
 
     email: EmailStr
+    directory_url: str = Field(..., min_length=1)
+    account_key_path: Path
 
 
 class AzureConfig(BaseModel):
@@ -92,6 +94,7 @@ class GatewayConfig(BaseModel):
     """Application Gateway configuration with one or more domain entries."""
 
     name: str = Field(..., min_length=1)
+    acme_function_name: str = Field(..., min_length=1)
     domains: list[DomainConfig] = Field(..., min_length=1)
 
 

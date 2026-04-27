@@ -42,6 +42,8 @@ _CONFIG_TEMPLATE: str = """\
 
 acme:
   email: "your-email@example.com"  # Required: ACME account contact email
+  directory_url: "https://acme-v02.api.letsencrypt.org/directory"  # Required: ACME CA directory URL
+  account_key_path: "~/.config/az-acme-tool/account.key"  # Required: ACME account key path
 
 azure:
   subscription_id: "00000000-0000-0000-0000-000000000000"  # Required: Azure subscription UUID
@@ -50,6 +52,7 @@ azure:
 
 gateways:
   - name: "my-app-gateway"  # Required: Application Gateway name
+    acme_function_name: "my-acme-responder-func"  # Required: Azure Function App name (HTTP-01)
     domains:
       - domain: "www.example.com"
         cert_store: "agw_direct"

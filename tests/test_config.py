@@ -21,7 +21,11 @@ from az_acme_tool.config import (
 # ---------------------------------------------------------------------------
 
 _VALID_CONFIG: dict[str, Any] = {
-    "acme": {"email": "admin@example.com"},
+    "acme": {
+        "email": "admin@example.com",
+        "directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory",
+        "account_key_path": "/tmp/account.key",
+    },
     "azure": {
         "subscription_id": "123e4567-e89b-12d3-a456-426614174000",
         "resource_group": "my-rg",
@@ -30,6 +34,7 @@ _VALID_CONFIG: dict[str, Any] = {
     "gateways": [
         {
             "name": "my-gateway",
+            "acme_function_name": "my-acme-func",
             "domains": [
                 {"domain": "example.com", "cert_store": "agw_direct"},
             ],
@@ -57,11 +62,14 @@ def test_parse_config_valid_returns_app_config(valid_config_file: Path) -> None:
 
     assert isinstance(result, AppConfig)
     assert result.acme.email == "admin@example.com"
+    assert result.acme.directory_url == "https://acme-staging-v02.api.letsencrypt.org/directory"
+    assert result.acme.account_key_path == Path("/tmp/account.key")
     assert str(result.azure.subscription_id) == "123e4567-e89b-12d3-a456-426614174000"
     assert result.azure.resource_group == "my-rg"
     assert result.azure.auth_method == AuthMethod.default
     assert len(result.gateways) == 1
     assert result.gateways[0].name == "my-gateway"
+    assert result.gateways[0].acme_function_name == "my-acme-func"
     assert len(result.gateways[0].domains) == 1
     assert result.gateways[0].domains[0].domain == "example.com"
     assert result.gateways[0].domains[0].cert_store == CertStore.agw_direct
@@ -84,6 +92,7 @@ def test_missing_acme_email_raises_config_error(tmp_path: Path) -> None:
         "gateways": [
             {
                 "name": "gw",
+                "acme_function_name": "my-acme-func",
                 "domains": [{"domain": "example.com", "cert_store": "agw_direct"}],
             }
         ],
@@ -105,7 +114,11 @@ def test_missing_acme_email_raises_config_error(tmp_path: Path) -> None:
 def test_missing_subscription_id_raises_config_error(tmp_path: Path) -> None:
     """Missing subscription_id raises ConfigError that names the failing field."""
     data: dict[str, Any] = {
-        "acme": {"email": "admin@example.com"},
+        "acme": {
+            "email": "admin@example.com",
+            "directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory",
+            "account_key_path": "/tmp/account.key",
+        },
         "azure": {
             # subscription_id missing
             "resource_group": "my-rg",
@@ -114,6 +127,7 @@ def test_missing_subscription_id_raises_config_error(tmp_path: Path) -> None:
         "gateways": [
             {
                 "name": "gw",
+                "acme_function_name": "my-acme-func",
                 "domains": [{"domain": "example.com", "cert_store": "agw_direct"}],
             }
         ],
@@ -135,7 +149,11 @@ def test_missing_subscription_id_raises_config_error(tmp_path: Path) -> None:
 def test_missing_resource_group_raises_config_error(tmp_path: Path) -> None:
     """Missing resource_group raises ConfigError that names the failing field."""
     data: dict[str, Any] = {
-        "acme": {"email": "admin@example.com"},
+        "acme": {
+            "email": "admin@example.com",
+            "directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory",
+            "account_key_path": "/tmp/account.key",
+        },
         "azure": {
             "subscription_id": "123e4567-e89b-12d3-a456-426614174000",
             # resource_group missing
@@ -144,6 +162,7 @@ def test_missing_resource_group_raises_config_error(tmp_path: Path) -> None:
         "gateways": [
             {
                 "name": "gw",
+                "acme_function_name": "my-acme-func",
                 "domains": [{"domain": "example.com", "cert_store": "agw_direct"}],
             }
         ],
@@ -165,7 +184,11 @@ def test_missing_resource_group_raises_config_error(tmp_path: Path) -> None:
 def test_non_uuid_subscription_id_raises_config_error(tmp_path: Path) -> None:
     """Non-UUID subscription_id raises ConfigError."""
     data: dict[str, Any] = {
-        "acme": {"email": "admin@example.com"},
+        "acme": {
+            "email": "admin@example.com",
+            "directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory",
+            "account_key_path": "/tmp/account.key",
+        },
         "azure": {
             "subscription_id": "not-a-uuid",
             "resource_group": "my-rg",
@@ -174,6 +197,7 @@ def test_non_uuid_subscription_id_raises_config_error(tmp_path: Path) -> None:
         "gateways": [
             {
                 "name": "gw",
+                "acme_function_name": "my-acme-func",
                 "domains": [{"domain": "example.com", "cert_store": "agw_direct"}],
             }
         ],
@@ -193,7 +217,11 @@ def test_non_uuid_subscription_id_raises_config_error(tmp_path: Path) -> None:
 def test_invalid_email_raises_config_error(tmp_path: Path) -> None:
     """Invalid email in acme_email raises ConfigError."""
     data: dict[str, Any] = {
-        "acme": {"email": "not-an-email"},
+        "acme": {
+            "email": "not-an-email",
+            "directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory",
+            "account_key_path": "/tmp/account.key",
+        },
         "azure": {
             "subscription_id": "123e4567-e89b-12d3-a456-426614174000",
             "resource_group": "my-rg",
@@ -202,6 +230,7 @@ def test_invalid_email_raises_config_error(tmp_path: Path) -> None:
         "gateways": [
             {
                 "name": "gw",
+                "acme_function_name": "my-acme-func",
                 "domains": [{"domain": "example.com", "cert_store": "agw_direct"}],
             }
         ],
@@ -221,7 +250,11 @@ def test_invalid_email_raises_config_error(tmp_path: Path) -> None:
 def test_invalid_auth_method_raises_config_error(tmp_path: Path) -> None:
     """Invalid auth_method value raises ConfigError."""
     data: dict[str, Any] = {
-        "acme": {"email": "admin@example.com"},
+        "acme": {
+            "email": "admin@example.com",
+            "directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory",
+            "account_key_path": "/tmp/account.key",
+        },
         "azure": {
             "subscription_id": "123e4567-e89b-12d3-a456-426614174000",
             "resource_group": "my-rg",
@@ -230,6 +263,7 @@ def test_invalid_auth_method_raises_config_error(tmp_path: Path) -> None:
         "gateways": [
             {
                 "name": "gw",
+                "acme_function_name": "my-acme-func",
                 "domains": [{"domain": "example.com", "cert_store": "agw_direct"}],
             }
         ],
@@ -249,7 +283,11 @@ def test_invalid_auth_method_raises_config_error(tmp_path: Path) -> None:
 def test_invalid_cert_store_raises_config_error(tmp_path: Path) -> None:
     """Invalid cert_store value raises ConfigError."""
     data: dict[str, Any] = {
-        "acme": {"email": "admin@example.com"},
+        "acme": {
+            "email": "admin@example.com",
+            "directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory",
+            "account_key_path": "/tmp/account.key",
+        },
         "azure": {
             "subscription_id": "123e4567-e89b-12d3-a456-426614174000",
             "resource_group": "my-rg",
@@ -258,6 +296,7 @@ def test_invalid_cert_store_raises_config_error(tmp_path: Path) -> None:
         "gateways": [
             {
                 "name": "gw",
+                "acme_function_name": "my-acme-func",
                 "domains": [{"domain": "example.com", "cert_store": "key_vault"}],
             }
         ],
@@ -277,7 +316,11 @@ def test_invalid_cert_store_raises_config_error(tmp_path: Path) -> None:
 def test_invalid_fqdn_raises_config_error(tmp_path: Path) -> None:
     """Invalid FQDN in domain raises ConfigError."""
     data: dict[str, Any] = {
-        "acme": {"email": "admin@example.com"},
+        "acme": {
+            "email": "admin@example.com",
+            "directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory",
+            "account_key_path": "/tmp/account.key",
+        },
         "azure": {
             "subscription_id": "123e4567-e89b-12d3-a456-426614174000",
             "resource_group": "my-rg",
@@ -286,6 +329,7 @@ def test_invalid_fqdn_raises_config_error(tmp_path: Path) -> None:
         "gateways": [
             {
                 "name": "gw",
+                "acme_function_name": "my-acme-func",
                 "domains": [{"domain": "not a valid domain!", "cert_store": "agw_direct"}],
             }
         ],
@@ -360,7 +404,11 @@ def test_all_auth_method_values_accepted(
 ) -> None:
     """All three valid auth_method values are accepted and map to enum members."""
     data: dict[str, Any] = {
-        "acme": {"email": "admin@example.com"},
+        "acme": {
+            "email": "admin@example.com",
+            "directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory",
+            "account_key_path": "/tmp/account.key",
+        },
         "azure": {
             "subscription_id": "123e4567-e89b-12d3-a456-426614174000",
             "resource_group": "my-rg",
@@ -369,6 +417,7 @@ def test_all_auth_method_values_accepted(
         "gateways": [
             {
                 "name": "gw",
+                "acme_function_name": "my-acme-func",
                 "domains": [{"domain": "example.com", "cert_store": "agw_direct"}],
             }
         ],
@@ -388,7 +437,11 @@ def test_all_auth_method_values_accepted(
 def test_empty_gateways_raises_config_error(tmp_path: Path) -> None:
     """parse_config() raises ConfigError when gateways is an empty list."""
     data: dict[str, Any] = {
-        "acme": {"email": "test@example.com"},
+        "acme": {
+            "email": "test@example.com",
+            "directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory",
+            "account_key_path": "/tmp/account.key",
+        },
         "azure": {
             "subscription_id": "12345678-1234-1234-1234-123456789012",
             "resource_group": "my-rg",
@@ -411,7 +464,11 @@ def test_empty_gateways_raises_config_error(tmp_path: Path) -> None:
 def test_empty_domains_raises_config_error(tmp_path: Path) -> None:
     """parse_config() raises ConfigError when a gateway's domains is an empty list."""
     data: dict[str, Any] = {
-        "acme": {"email": "test@example.com"},
+        "acme": {
+            "email": "test@example.com",
+            "directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory",
+            "account_key_path": "/tmp/account.key",
+        },
         "azure": {
             "subscription_id": "12345678-1234-1234-1234-123456789012",
             "resource_group": "my-rg",
@@ -420,6 +477,7 @@ def test_empty_domains_raises_config_error(tmp_path: Path) -> None:
         "gateways": [
             {
                 "name": "my-agw",
+                "acme_function_name": "my-acme-func",
                 "domains": [],
             }
         ],
@@ -436,10 +494,20 @@ def test_empty_domains_raises_config_error(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_agw_direct_cert_store_accepted(tmp_path: Path) -> None:
-    """cert_store: agw_direct is accepted and maps to CertStore.agw_direct."""
+# ---------------------------------------------------------------------------
+# issue-flow-core — new required fields (directory_url, account_key_path,
+# acme_function_name)
+# ---------------------------------------------------------------------------
+
+
+def test_missing_directory_url_raises_config_error(tmp_path: Path) -> None:
+    """Missing acme.directory_url raises ConfigError naming the missing field."""
     data: dict[str, Any] = {
-        "acme": {"email": "admin@example.com"},
+        "acme": {
+            "email": "admin@example.com",
+            # directory_url missing
+            "account_key_path": "/tmp/account.key",
+        },
         "azure": {
             "subscription_id": "123e4567-e89b-12d3-a456-426614174000",
             "resource_group": "my-rg",
@@ -448,6 +516,97 @@ def test_agw_direct_cert_store_accepted(tmp_path: Path) -> None:
         "gateways": [
             {
                 "name": "gw",
+                "acme_function_name": "my-acme-func",
+                "domains": [{"domain": "example.com", "cert_store": "agw_direct"}],
+            }
+        ],
+    }
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(yaml.dump(data), encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="directory_url"):
+        parse_config(config_file)
+
+
+def test_missing_account_key_path_raises_config_error(tmp_path: Path) -> None:
+    """Missing acme.account_key_path raises ConfigError naming the missing field."""
+    data: dict[str, Any] = {
+        "acme": {
+            "email": "admin@example.com",
+            "directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory",
+            # account_key_path missing
+        },
+        "azure": {
+            "subscription_id": "123e4567-e89b-12d3-a456-426614174000",
+            "resource_group": "my-rg",
+            "auth_method": "default",
+        },
+        "gateways": [
+            {
+                "name": "gw",
+                "acme_function_name": "my-acme-func",
+                "domains": [{"domain": "example.com", "cert_store": "agw_direct"}],
+            }
+        ],
+    }
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(yaml.dump(data), encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="account_key_path"):
+        parse_config(config_file)
+
+
+def test_missing_acme_function_name_raises_config_error(tmp_path: Path) -> None:
+    """Missing gateways[*].acme_function_name raises ConfigError naming the missing field."""
+    data: dict[str, Any] = {
+        "acme": {
+            "email": "admin@example.com",
+            "directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory",
+            "account_key_path": "/tmp/account.key",
+        },
+        "azure": {
+            "subscription_id": "123e4567-e89b-12d3-a456-426614174000",
+            "resource_group": "my-rg",
+            "auth_method": "default",
+        },
+        "gateways": [
+            {
+                "name": "gw",
+                # acme_function_name missing
+                "domains": [{"domain": "example.com", "cert_store": "agw_direct"}],
+            }
+        ],
+    }
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(yaml.dump(data), encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="acme_function_name"):
+        parse_config(config_file)
+
+
+def test_account_key_path_parsed_as_path(valid_config_file: Path) -> None:
+    """acme.account_key_path is parsed as a pathlib.Path object."""
+    result = parse_config(valid_config_file)
+    assert isinstance(result.acme.account_key_path, Path)
+
+
+def test_agw_direct_cert_store_accepted(tmp_path: Path) -> None:
+    """cert_store: agw_direct is accepted and maps to CertStore.agw_direct."""
+    data: dict[str, Any] = {
+        "acme": {
+            "email": "admin@example.com",
+            "directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory",
+            "account_key_path": "/tmp/account.key",
+        },
+        "azure": {
+            "subscription_id": "123e4567-e89b-12d3-a456-426614174000",
+            "resource_group": "my-rg",
+            "auth_method": "default",
+        },
+        "gateways": [
+            {
+                "name": "gw",
+                "acme_function_name": "my-acme-func",
                 "domains": [{"domain": "sub.example.com", "cert_store": "agw_direct"}],
             }
         ],
