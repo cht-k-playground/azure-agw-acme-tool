@@ -53,9 +53,9 @@ The `AzureGatewayClient` is also missing three methods required by the pipeline:
 
 ### Decision 3: Temporary routing rule cleanup
 
-**Choice**: Wrap steps 5–13 in a `try/finally` block. The `finally` clause calls `delete_routing_rule(rule_name)` unconditionally.
+**Choice**: Wrap steps 5–13 in a `try/finally` block. The `finally` clause calls `delete_routing_rule(rule_name)` whenever step 6 (`add_routing_rule`) succeeded, tracked via a local `rule_added` flag. Any exception raised by the cleanup itself is logged and swallowed so it cannot mask the original failure.
 
-**Rationale**: The ROADMAP spec (step 14) explicitly requires the temporary rule to be deleted even if earlier steps fail. A `finally` block is the idiomatic Python mechanism for guaranteed cleanup.
+**Rationale**: The ROADMAP spec (step 14) requires the temporary rule to be deleted whenever it was created, including when steps 7–13 raise. Guarding the cleanup on `rule_added` avoids a spurious "rule not found" call when step 5 fails (rule was never created) and matches the spec scenario *"WHEN any step between 6 and 13 raises an exception THEN delete_routing_rule() is still called"*.
 
 ### Decision 4: SSL certificate naming
 

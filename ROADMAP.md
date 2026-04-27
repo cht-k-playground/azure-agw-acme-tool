@@ -318,7 +318,7 @@
 
 ---
 
-- [ ] `issue-flow-core` — 單一 domain 的完整 14 步 ACME 流程實作
+- [x] `issue-flow-core` — 單一 domain 的完整 14 步 ACME 流程實作
 
   **Dependencies**：`cli-issue`、`cli-renew`、`cli-status`、`cli-cleanup`、`azure-function-responder`、`cert-converter`
 
